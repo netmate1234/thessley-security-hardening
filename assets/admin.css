@@ -1,0 +1,109 @@
+.thessley { --ok:#00875a; --warn:#b26e00; --bad:#c9356a; --crit:#8b0a3e;
+	--ink:#1d2327; --muted:#646970; --line:#dcdcde; --card:#fff; --bg:#f6f7f7; --blue:#2271b1; }
+.thessley { max-width:1180px; }
+
+/* Header */
+.thessley-head { display:flex; gap:14px; align-items:flex-start; margin:6px 0 20px; }
+.thessley-head__icon { font-size:32px; width:32px; height:32px; color:var(--blue); flex:none; margin-top:2px; }
+.thessley-head h1 { margin:0; padding:0; font-size:23px; line-height:1.3; }
+.thessley-head__desc { margin:5px 0 0; color:var(--muted); max-width:72ch; font-size:13px; }
+
+/* Notices */
+.thessley-notice { display:flex; gap:10px; align-items:flex-start; padding:11px 14px;
+	border-radius:6px; margin:0 0 16px; border:1px solid; font-size:13px; }
+.thessley-notice .dashicons { flex:none; }
+.thessley-notice p { margin:.3em 0; }
+.thessley-notice ul { margin:.4em 0 .4em 1.4em; list-style:disc; }
+.thessley-notice--success { background:#edf7f2; border-color:#b6e0cb; color:#0a5c3e; }
+.thessley-notice--success .dashicons { color:var(--ok); }
+.thessley-notice--warning { background:#fcf9e8; border-color:#f0e2a1; color:#6b5200; }
+.thessley-notice--warning .dashicons { color:#dba617; }
+.thessley-notice--error   { background:#fdf0f4; border-color:#f3c2d2; color:#8b0a3e; }
+.thessley-notice--error .dashicons { color:var(--bad); }
+.thessley-notice--info    { background:#f0f6fc; border-color:#c5d9ed; color:#124f80; }
+.thessley-notice--info .dashicons { color:var(--blue); }
+
+/* Sections */
+.thessley-section { background:var(--card); border:1px solid var(--line);
+	border-radius:8px; margin:0 0 18px; overflow:hidden; }
+.thessley-section__head { display:flex; align-items:center; gap:9px;
+	padding:12px 16px; border-bottom:1px solid var(--line); background:var(--bg); }
+.thessley-section__head .dashicons { color:var(--muted); font-size:18px; width:18px; height:18px; }
+.thessley-section__head h2 { margin:0; padding:0; font-size:14px; font-weight:600; color:var(--ink); }
+.thessley-section__sub { margin-left:auto; font-size:12px; color:var(--muted); }
+.thessley-section__body { padding:16px; }
+.thessley-section__body > :first-child { margin-top:0; }
+.thessley-section__body > :last-child { margin-bottom:0; }
+
+/* Settings rows */
+.thessley-row { display:flex; gap:20px; padding:14px 0; border-bottom:1px solid #f0f0f1; }
+.thessley-row:first-child { padding-top:0; }
+.thessley-row:last-child { border-bottom:0; padding-bottom:0; }
+.thessley-row__label { flex:0 0 190px; font-weight:600; font-size:13px; color:var(--ink); padding-top:2px; }
+.thessley-row__field { flex:1; min-width:0; }
+.thessley-row__field label { display:inline-flex; align-items:flex-start; gap:7px; font-size:13px; }
+.thessley-row__field > label { display:flex; margin-bottom:6px; }
+.thessley-help { margin:6px 0 0; color:var(--muted); font-size:12px; max-width:74ch; }
+.thessley-help code { font-size:11px; background:var(--bg); padding:1px 4px; border-radius:3px; }
+
+/* Badges + tiles */
+.thessley-badge { display:inline-flex; align-items:center; gap:4px; font-size:12px;
+	font-weight:600; padding:3px 9px; border-radius:11px; background:#f0f0f1; color:var(--muted); }
+.thessley-badge .dashicons { font-size:14px; width:14px; height:14px; }
+.thessley-badge--good { background:#e5f5ee; color:var(--ok); }
+.thessley-badge--warn { background:#fcf3e3; color:var(--warn); }
+.thessley-badge--bad  { background:#fdeaf1; color:var(--bad); }
+
+.thessley-tiles { display:flex; flex-wrap:wrap; gap:20px; }
+.thessley-tile { display:flex; align-items:center; gap:10px; }
+.thessley-tile .dashicons { font-size:21px; width:21px; height:21px; color:var(--muted); }
+.thessley-tile--good .dashicons { color:var(--ok); }
+.thessley-tile--warn .dashicons { color:var(--warn); }
+.thessley-tile--bad .dashicons  { color:var(--bad); }
+.thessley-tile strong { display:block; font-size:19px; line-height:1.2; color:var(--ink); }
+.thessley-tile span:last-child { font-size:12px; color:var(--muted); }
+
+/* Severity */
+.thessley-sev { display:inline-flex; align-items:center; gap:6px; }
+.thessley-sev__num { display:inline-grid; place-items:center; min-width:26px; height:22px;
+	padding:0 5px; border-radius:4px; color:#fff; font-weight:700; font-size:12px;
+	font-variant-numeric:tabular-nums; }
+.thessley-sev__label { font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); }
+
+/* Tables */
+.thessley-table-scroll { width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+.thessley-table { width:100%; border-collapse:separate; border-spacing:0; }
+.thessley-table th { text-align:left; font-size:11px; text-transform:uppercase;
+	letter-spacing:.5px; color:var(--muted); padding:8px 10px;
+	background:var(--bg); border-bottom:1px solid var(--line); }
+.thessley-table td { padding:9px 10px; border-bottom:1px solid #f0f0f1; font-size:13px; vertical-align:middle; }
+.thessley-table tr:last-child td { border-bottom:0; }
+.thessley-table tbody tr:hover { background:#fafafa; }
+.thessley-table code { font-size:12px; background:var(--bg); padding:1px 5px; border-radius:3px; }
+.thessley-nowrap { white-space:nowrap; }
+.thessley-muted { color:var(--muted); font-size:12px; }
+
+/* Scroll container for long lists */
+.thessley-scroll { max-height:280px; overflow:auto; border:1px solid var(--line);
+	border-radius:6px; padding:10px 12px; background:var(--bg); }
+.thessley-scroll label { display:flex; margin-bottom:4px; }
+
+/* File lists */
+.thessley-files { margin:0 0 10px; }
+.thessley-files__title { font-weight:600; margin:0 0 4px; }
+.thessley-files ul { margin:0 0 0 1.4em; list-style:disc; }
+.thessley-files code { font-size:12px; }
+
+/* Empty state */
+.thessley-empty { text-align:center; padding:28px; color:var(--muted); }
+.thessley-empty .dashicons { font-size:28px; width:28px; height:28px; color:var(--ok); }
+.thessley-empty p { margin:.5em 0 0; }
+
+.thessley .button + .button { margin-left:6px; }
+.thessley form { margin:0; }
+.thessley-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+
+@media screen and (max-width:782px) {
+	.thessley-row { flex-direction:column; gap:6px; }
+	.thessley-row__label { flex:none; }
+}

@@ -1,0 +1,30 @@
+.thessley-geo-map-wrap { max-width:100%; overflow-x:auto; }
+.thessley-geo-map-wrap svg { width:100%; height:auto; max-height:520px; }
+.thessley-geo-map-wrap svg path { fill:#e2e4e8; stroke:#fff; stroke-width:0.4; }
+
+/*
+ * Generated from Thessley_Module_Geo_Map::BUCKET_COLORS, a fixed 5-color
+ * class constant — hardcoded here rather than built by PHP at request
+ * time, since the source values never change without a code edit anyway.
+ * Some countries (US, CA, AU, JP, GB, ...) are a <g id="xx"> wrapping
+ * several unlabelled <path> children rather than a single <path id="xx">,
+ * so the class lands on the <g> — the descendant selector is what
+ * actually reaches those child shapes; the plain "path.thessley-geo-bN"
+ * selector alone only covers the single-shape countries.
+ */
+.thessley-geo-map-wrap svg path.thessley-geo-b0,
+.thessley-geo-map-wrap svg g.thessley-geo-b0 path { fill:#ffe3e0; cursor:pointer; }
+.thessley-geo-map-wrap svg path.thessley-geo-b1,
+.thessley-geo-map-wrap svg g.thessley-geo-b1 path { fill:#ffab9e; cursor:pointer; }
+.thessley-geo-map-wrap svg path.thessley-geo-b2,
+.thessley-geo-map-wrap svg g.thessley-geo-b2 path { fill:#f96f5c; cursor:pointer; }
+.thessley-geo-map-wrap svg path.thessley-geo-b3,
+.thessley-geo-map-wrap svg g.thessley-geo-b3 path { fill:#dc2f2f; cursor:pointer; }
+.thessley-geo-map-wrap svg path.thessley-geo-b4,
+.thessley-geo-map-wrap svg g.thessley-geo-b4 path { fill:#7a0c14; cursor:pointer; }
+
+.thessley-geo-map-wrap svg path.thessley-geo-hit:hover,
+.thessley-geo-map-wrap svg g.thessley-geo-hit:hover path { stroke:#1d2327; stroke-width:1.2; }
+.thessley-geo-tip { position:fixed; display:none; pointer-events:none; z-index:9999;
+	background:#1d2327; color:#fff; font-size:12px; padding:5px 9px; border-radius:5px;
+	box-shadow:0 2px 8px rgba(0,0,0,.25); white-space:nowrap; }

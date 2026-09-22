@@ -1,0 +1,7 @@
+world-map.svg
+Source: https://github.com/flekschas/simple-world-map (Fritz Lekschas)
+License: Creative Commons Attribution-ShareAlike 3.0 Unported (CC BY-SA 3.0)
+https://creativecommons.org/licenses/by-sa/3.0/
+
+Unmodified except for server-side injection of per-country CSS classes and
+data-* attributes at render time (done in module.php, not in this file).
