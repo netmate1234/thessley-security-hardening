@@ -175,6 +175,26 @@ class Thessley_Module_Loader {
 		}
 		$legacy_checks_dir = WPMU_PLUGIN_DIR . '/' . $legacy_checks_dirname;
 		if ( is_dir( $legacy_checks_dir ) ) {
+			// The checks dir holds two different kinds of files: the check.php
+			// templates (re-deployed fresh into the new dir by each module's own
+			// deploy_check_file(), already stale here and fine to discard) and a
+			// data/ subdirectory of compiled runtime state (geo-blocker's country
+			// index, ip-blocklist's compiled ranges, etc.) that nothing
+			// regenerates on its own — several modules now require an explicit
+			// admin action before they'll ever refetch, so simply deleting this
+			// wholesale silently destroys real data with no way back. Move data/
+			// forward into the new checks dir first; only what's left after that
+			// (the stale check.php files) gets deleted.
+			$legacy_data_dir = $legacy_checks_dir . '/data';
+			if ( is_dir( $legacy_data_dir ) ) {
+				$new_data_dir = THESSLEY_CHECKS_DIR . '/data';
+				if ( ! file_exists( THESSLEY_CHECKS_DIR ) ) {
+					wp_mkdir_p( THESSLEY_CHECKS_DIR );
+				}
+				if ( ! file_exists( $new_data_dir ) ) {
+					self::filesystem()->move( $legacy_data_dir, $new_data_dir, true );
+				}
+			}
 			self::filesystem()->delete( $legacy_checks_dir, true );
 		}
 
