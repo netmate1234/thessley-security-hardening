@@ -4,7 +4,7 @@ Tags: security, firewall, malware, geo-blocking, brute-force
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.13
+Stable tag: 1.0.14
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -98,6 +98,9 @@ This plugin can connect to several third-party services to power its blocking, g
 **unwantedip.eagleeye-intelligence.com (IP Sharing module, opt-in — requires an API key you request)** — a self-hosted IP-reputation tracker run by this plugin's author, shared across sites that opt in. Sends: the blocked IP address, an event category, and a severity label, only when this site actually blocks a request (rate-limited to at most once per IP per hour). The same service can optionally be read back as an additional IP-reputation feed in IP Blocklist (`https://unwantedip.eagleeye-intelligence.com/api/v1/feed/wordpress`), which sends nothing — it's a read-only fetch. A dedicated Terms/Privacy page for this service is in progress.
 
 == Changelog ==
+
+= 1.0.14 =
+* Silenced 10 Plugin Check warnings on the legacy-identifier migration's DB queries — the refactor into a reusable helper (1.0.13) lost the justification annotations covering table-identifier renames and prefix-based option lookups. Verified with a fresh Plugin Check run: 0 errors, 1 warning (the expected, unfixable "Plugin Updater detected" notice for the Auto Updates module's own advertised feature).
 
 = 1.0.13 =
 * Fixed a data-loss bug in the legacy-identifier migration: the old-checks-directory cleanup was deleting compiled runtime data (Geo Blocker's country index, IP Blocklist's compiled ranges) along with the stale files it was meant to remove, with no automatic way to regenerate it. Compiled data now survives the migration.

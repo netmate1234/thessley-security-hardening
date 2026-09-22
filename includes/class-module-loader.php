@@ -140,15 +140,15 @@ class Thessley_Module_Loader {
 			$wpdb->prefix . $old_prefix . 'baseline' => $wpdb->prefix . $new_prefix . 'baseline',
 			$wpdb->prefix . $old_prefix . 'bot_log'  => $wpdb->prefix . $new_prefix . 'bot_log',
 		);
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- one-time migration, not a per-request lookup worth caching; $old_table/$new_table are built from $wpdb->prefix plus fixed literals ($old_prefix/$new_prefix, both hardcoded call-site strings, never user input), and RENAME TABLE can't use placeholders for identifiers anyway.
 		foreach ( $table_renames as $old_table => $new_table ) {
 			$old_exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $old_table ) ) === $old_table;
 			$new_exists = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $new_table ) ) === $new_table;
 			if ( $old_exists && ! $new_exists ) {
-				$wpdb->query( "RENAME TABLE `{$old_table}` TO `{$new_table}`" ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- identifiers built from $wpdb->prefix plus fixed literals, not user input; RENAME TABLE can't use placeholders for identifiers.
+				$wpdb->query( "RENAME TABLE `{$old_table}` TO `{$new_table}`" );
 			}
 		}
 
-		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- REPLACE()/LIKE arguments below are fixed literals, no user input.
 		$wpdb->query(
 			$wpdb->prepare(
 				"UPDATE {$wpdb->options} SET option_name = REPLACE(option_name, %s, %s) WHERE option_name LIKE %s",
@@ -157,6 +157,7 @@ class Thessley_Module_Loader {
 				$wpdb->esc_like( $old_prefix ) . '%'
 			)
 		);
+		// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter
 
 		// The old-named mu-plugin file and its checks dir are a separate file
 		// on disk from the current one (WPMU_PLUGIN_DIR . "/{$legacy_mu_filename}"
