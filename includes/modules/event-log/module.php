@@ -390,7 +390,9 @@ class Thessley_Module_Event_Log {
 							?>
 						</td>
 						<td style="max-width:170px">
-							<code class="thessley-nowrap"><?php echo esc_html( $row->ip ); ?></code>
+							<a href="<?php echo esc_url( 'https://unwantedip.eagleeye-intelligence.com/ip/' . rawurlencode( $row->ip ) ); ?>" target="_blank" rel="noopener" title="Check this IP on unwantedip">
+								<code class="thessley-nowrap"><?php echo esc_html( $row->ip ); ?></code>
+							</a>
 							<?php
 							$ip_info = self::ip_info( $row->ip );
 							if ( $ip_info['country'] ) {
