@@ -267,7 +267,11 @@ class Thessley_Module_Bot_Log {
 					<tr>
 						<td class="thessley-nowrap"><?php echo esc_html( mysql2date( 'M j, H:i', $row->created_at ) ); ?></td>
 						<td><?php echo esc_html( $row->bot_name ); ?></td>
-						<td><code class="thessley-nowrap"><?php echo esc_html( $row->ip ); ?></code></td>
+						<td>
+							<a href="<?php echo esc_url( 'https://unwantedip.eagleeye-intelligence.com/ip/' . rawurlencode( $row->ip ) ); ?>" target="_blank" rel="noopener" title="Check this IP on unwantedip">
+								<code class="thessley-nowrap"><?php echo esc_html( $row->ip ); ?></code>
+							</a>
+						</td>
 						<td>
 							<?php if ( isset( $blocked_ip_set[ $row->ip ] ) ) : ?>
 								<a href="<?php echo esc_url( Thessley_Menu_Router::url( 'event-log', array( 'f_ip' => $row->ip ) ) ); ?>">
