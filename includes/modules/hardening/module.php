@@ -64,22 +64,24 @@ class Thessley_Module_Hardening {
 			. "</FilesMatch>\n"
 			. "# END Thessley Security Hardening uploads guard\n";
 
-		$existing = file_exists( $path ) ? (string) file_get_contents( $path ) : '';
+		$fs       = Thessley_Module_Loader::filesystem();
+		$existing = ( $fs && $fs->exists( $path ) ) ? (string) $fs->get_contents( $path ) : '';
 
 		if ( false !== strpos( $existing, self::UPLOADS_GUARD_MARKER ) ) {
 			return true; // already present
 		}
 
-		return false !== file_put_contents( $path, $rules . $existing, LOCK_EX );
+		return (bool) Thessley_Module_Loader::fs_put_contents( $path, $rules . $existing );
 	}
 
 	public static function remove_uploads_guard() {
 		$path = self::uploads_htaccess_path();
-		if ( ! file_exists( $path ) ) {
+		$fs   = Thessley_Module_Loader::filesystem();
+		if ( ! $fs || ! $fs->exists( $path ) ) {
 			return;
 		}
 
-		$content = (string) file_get_contents( $path );
+		$content = (string) $fs->get_contents( $path );
 		$cleaned = preg_replace(
 			'/' . preg_quote( self::UPLOADS_GUARD_MARKER, '/' ) . '.*?# END Thessley Security Hardening uploads guard\s*/s',
 			'',
@@ -87,9 +89,9 @@ class Thessley_Module_Hardening {
 		);
 
 		if ( '' === trim( (string) $cleaned ) ) {
-			Thessley_Module_Loader::filesystem()->delete( $path );
+			Thessley_Module_Loader::fs_delete( $path );
 		} elseif ( $cleaned !== $content ) {
-			file_put_contents( $path, $cleaned, LOCK_EX );
+			Thessley_Module_Loader::fs_put_contents( $path, $cleaned );
 		}
 	}
 

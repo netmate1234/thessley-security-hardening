@@ -36,7 +36,7 @@ class Thessley_Module_Query_Guard {
 		wp_clear_scheduled_hook( self::XMLRPC_CRON_HOOK );
 
 		if ( file_exists( self::check_dest() ) ) {
-			Thessley_Module_Loader::filesystem()->delete( self::check_dest() );
+			Thessley_Module_Loader::fs_delete( self::check_dest() );
 		}
 	}
 
@@ -192,8 +192,13 @@ class Thessley_Module_Query_Guard {
 	/** @return array{id:string,detail:string}|null */
 	private static function find_body_hit() {
 		// Uploaded filenames first — an executable extension arriving from an
-		// anonymous visitor is about as unambiguous as a signal gets.
-		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- this is a WAF-style scanner that must inspect every anonymous POST/PUT request site-wide for malicious payloads; a real attacker will never send a valid nonce, so nonce-gating would defeat the check entirely.
+		// anonymous visitor is about as unambiguous as a signal gets. The raw
+		// filename must reach preg_match() and the stored log detail
+		// unsanitized: sanitizing it would strip or alter exactly the
+		// characters (the dangerous extension) this check exists to detect,
+		// and the detail is a truncated (100 char) plain-text log entry,
+		// never echoed as HTML.
+		// phpcs:disable WordPress.Security.NonceVerification.Missing, WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- this is a WAF-style scanner that must inspect every anonymous POST/PUT request site-wide for malicious payloads; a real attacker will never send a valid nonce, so nonce-gating would defeat the check entirely.
 		foreach ( (array) $_FILES as $field => $file ) {
 			// A multi-dimensional field name (e.g. upload[file][]) nests
 			// 'name' more than one level deep — flatten() (already used for
@@ -209,6 +214,7 @@ class Thessley_Module_Query_Guard {
 				}
 			}
 		}
+		// phpcs:enable WordPress.Security.NonceVerification.Missing, WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
 
 		$patterns = self::body_patterns();
 
@@ -302,7 +308,7 @@ class Thessley_Module_Query_Guard {
 
 		$source = __DIR__ . '/check.php';
 		if ( ! file_exists( self::check_dest() ) || md5_file( self::check_dest() ) !== md5_file( $source ) ) {
-			Thessley_Module_Loader::filesystem()->copy( $source, self::check_dest(), true );
+			Thessley_Module_Loader::fs_copy( $source, self::check_dest(), true );
 			// Without this, a worker process that already opcache-compiled the
 			// old bytecode can keep serving stale check logic across multiple
 			// requests until that cache entry's own revalidation timer fires —

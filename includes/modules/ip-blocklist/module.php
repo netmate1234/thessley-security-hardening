@@ -33,7 +33,7 @@ class Thessley_Module_IP_Blocklist {
 		wp_clear_scheduled_hook( self::CRON_HOOK );
 
 		if ( file_exists( self::check_dest() ) ) {
-			Thessley_Module_Loader::filesystem()->delete( self::check_dest() );
+			Thessley_Module_Loader::fs_delete( self::check_dest() );
 		}
 	}
 
@@ -80,7 +80,7 @@ class Thessley_Module_IP_Blocklist {
 
 		$source = __DIR__ . '/check.php';
 		if ( ! file_exists( self::check_dest() ) || md5_file( self::check_dest() ) !== md5_file( $source ) ) {
-			Thessley_Module_Loader::filesystem()->copy( $source, self::check_dest(), true );
+			Thessley_Module_Loader::fs_copy( $source, self::check_dest(), true );
 			// Without this, a worker process that already opcache-compiled the
 			// old bytecode can keep serving stale check logic across multiple
 			// requests until that cache entry's own revalidation timer fires —

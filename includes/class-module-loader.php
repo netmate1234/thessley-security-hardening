@@ -87,9 +87,43 @@ class Thessley_Module_Loader {
 		global $wp_filesystem;
 		if ( ! $wp_filesystem ) {
 			require_once ABSPATH . 'wp-admin/includes/file.php';
+			// On a host without direct filesystem access, WP_Filesystem()
+			// can fail without valid stored credentials rather than prompt
+			// for them — there's no admin present to answer a credentials
+			// form during activation/cron. $wp_filesystem then stays unset,
+			// so every fs_*() helper below must (and does) treat a falsy
+			// self::filesystem() as "can't write right now", not fatal.
 			WP_Filesystem();
 		}
 		return $wp_filesystem;
+	}
+
+	/**
+	 * Every raw filesystem write in this plugin goes through one of these
+	 * instead of calling self::filesystem()->method() directly, so a host
+	 * where WP_Filesystem() can't initialize (see the docblock above)
+	 * degrades to a no-op everywhere rather than a fatal "call to a member
+	 * function on bool" on whichever call site happened to run first —
+	 * exactly what broke activation on such hosts before this existed.
+	 */
+	public static function fs_copy( $source, $destination, $overwrite = false ) {
+		$fs = self::filesystem();
+		return $fs ? $fs->copy( $source, $destination, $overwrite ) : false;
+	}
+
+	public static function fs_delete( $path, $recursive = false ) {
+		$fs = self::filesystem();
+		return $fs ? $fs->delete( $path, $recursive ) : false;
+	}
+
+	public static function fs_move( $source, $destination, $overwrite = false ) {
+		$fs = self::filesystem();
+		return $fs ? $fs->move( $source, $destination, $overwrite ) : false;
+	}
+
+	public static function fs_put_contents( $path, $contents, $mode = false ) {
+		$fs = self::filesystem();
+		return $fs ? $fs->put_contents( $path, $contents, $mode ) : false;
 	}
 
 	/**
@@ -172,7 +206,7 @@ class Thessley_Module_Loader {
 		// not pre-bootstrap on every front-end request.
 		$legacy_mu_file = WPMU_PLUGIN_DIR . '/' . $legacy_mu_filename;
 		if ( file_exists( $legacy_mu_file ) ) {
-			self::filesystem()->delete( $legacy_mu_file );
+			self::fs_delete( $legacy_mu_file );
 		}
 		$legacy_checks_dir = WPMU_PLUGIN_DIR . '/' . $legacy_checks_dirname;
 		if ( is_dir( $legacy_checks_dir ) ) {
@@ -193,10 +227,10 @@ class Thessley_Module_Loader {
 					wp_mkdir_p( THESSLEY_CHECKS_DIR );
 				}
 				if ( ! file_exists( $new_data_dir ) ) {
-					self::filesystem()->move( $legacy_data_dir, $new_data_dir, true );
+					self::fs_move( $legacy_data_dir, $new_data_dir, true );
 				}
 			}
-			self::filesystem()->delete( $legacy_checks_dir, true );
+			self::fs_delete( $legacy_checks_dir, true );
 		}
 
 		update_option( $done_flag, 1 );
@@ -882,7 +916,7 @@ class Thessley_Module_Loader {
 		if ( ! file_exists( WPMU_PLUGIN_DIR ) ) {
 			wp_mkdir_p( WPMU_PLUGIN_DIR );
 		}
-		self::filesystem()->copy( THESSLEY_MU_SOURCE, THESSLEY_MU_DEST, true );
+		self::fs_copy( THESSLEY_MU_SOURCE, THESSLEY_MU_DEST, true );
 
 		// Every other rewritten data file in this plugin does this; the
 		// mu-loader itself — by far the most consequential one, since it
@@ -901,7 +935,7 @@ class Thessley_Module_Loader {
 
 	private static function remove_mu_loader() {
 		if ( file_exists( THESSLEY_MU_DEST ) ) {
-			self::filesystem()->delete( THESSLEY_MU_DEST );
+			self::fs_delete( THESSLEY_MU_DEST );
 		}
 	}
 
