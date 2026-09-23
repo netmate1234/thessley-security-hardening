@@ -4,7 +4,7 @@ Tags: security, firewall, malware, geo-blocking, brute-force
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.15
+Stable tag: 1.0.16
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -95,9 +95,12 @@ This plugin can connect to several third-party services to power its blocking, g
 
 **Telegram Bot API (Alerts module, opt-in — requires a bot token and chat ID you provide)** — sends a message to a Telegram chat you control when a security event crosses the severity threshold you configure. Sends: the alert text (module, event type, severity, source IP) to api.telegram.org, only at the moment a qualifying alert fires. Telegram Terms: https://telegram.org/tos — Privacy: https://telegram.org/privacy
 
-**unwantedip.eagleeye-intelligence.com (IP Sharing module, opt-in — requires an API key you request)** — a self-hosted IP-reputation tracker run by this plugin's author, shared across sites that opt in. Sends: the blocked IP address, an event category, and a severity label, only when this site actually blocks a request (rate-limited to at most once per IP per hour). The same service can optionally be read back as an additional IP-reputation feed in IP Blocklist (`https://unwantedip.eagleeye-intelligence.com/api/v1/feed/wordpress`), which sends nothing — it's a read-only fetch. A dedicated Terms/Privacy page for this service is in progress.
+**unwantedip.eagleeye-intelligence.com (IP Sharing module, opt-in — requires an API key you request)** — a self-hosted IP-reputation tracker run by this plugin's author, shared across sites that opt in. Sends: the blocked IP address, an event category, and a severity label, only when this site actually blocks a request (rate-limited to at most once per IP per hour). The same service can optionally be read back as an additional IP-reputation feed in IP Blocklist (`https://unwantedip.eagleeye-intelligence.com/api/v1/feed/wordpress`), which sends nothing — it's a read-only fetch. Terms: https://unwantedip.eagleeye-intelligence.com/terms.html — Privacy: https://unwantedip.eagleeye-intelligence.com/privacy-policy.html
 
 == Changelog ==
+
+= 1.0.16 =
+* unwantedip.eagleeye-intelligence.com now has a real Terms of Service and Privacy Policy page — linked from the External services section below.
 
 = 1.0.15 =
 * Fixed an activation-fatal risk: on a host where WP_Filesystem can't initialize without credentials, every raw filesystem() dereference across the plugin (mu-plugin deploy, compiled-data writers, the legacy migration) could fatal instead of degrading gracefully. All routed through safe wrappers now. Also extended a phpcs suppression that only covered its next line instead of the whole flagged block, and added the thessleysecurity Contributors entry.
