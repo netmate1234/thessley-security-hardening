@@ -4,7 +4,7 @@ Tags: security, firewall, malware, geo-blocking, brute-force
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.14
+Stable tag: 1.0.15
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -98,6 +98,9 @@ This plugin can connect to several third-party services to power its blocking, g
 **unwantedip.eagleeye-intelligence.com (IP Sharing module, opt-in — requires an API key you request)** — a self-hosted IP-reputation tracker run by this plugin's author, shared across sites that opt in. Sends: the blocked IP address, an event category, and a severity label, only when this site actually blocks a request (rate-limited to at most once per IP per hour). The same service can optionally be read back as an additional IP-reputation feed in IP Blocklist (`https://unwantedip.eagleeye-intelligence.com/api/v1/feed/wordpress`), which sends nothing — it's a read-only fetch. A dedicated Terms/Privacy page for this service is in progress.
 
 == Changelog ==
+
+= 1.0.15 =
+* Fixed an activation-fatal risk: on a host where WP_Filesystem can't initialize without credentials, every raw filesystem() dereference across the plugin (mu-plugin deploy, compiled-data writers, the legacy migration) could fatal instead of degrading gracefully. All routed through safe wrappers now. Also extended a phpcs suppression that only covered its next line instead of the whole flagged block, and added the thessleysecurity Contributors entry.
 
 = 1.0.14 =
 * Silenced 10 Plugin Check warnings on the legacy-identifier migration's DB queries — the refactor into a reusable helper (1.0.13) lost the justification annotations covering table-identifier renames and prefix-based option lookups. Verified with a fresh Plugin Check run: 0 errors, 1 warning (the expected, unfixable "Plugin Updater detected" notice for the Auto Updates module's own advertised feature).
