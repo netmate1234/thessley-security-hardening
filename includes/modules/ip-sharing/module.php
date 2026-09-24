@@ -52,7 +52,9 @@ class Thessley_Module_IP_Sharing {
 			wp_die( 'Forbidden', 403 );
 		}
 
-		$response = wp_remote_post( self::API . '/signup', array( 'timeout' => 15 ) );
+		// Explicit user-agent: WordPress' default one embeds this site's own
+		// address, which this service is documented never to receive.
+		$response = wp_remote_post( self::API . '/signup', array( 'timeout' => 15, 'user-agent' => 'wp-thessley/' . THESSLEY_VERSION ) );
 
 		if ( is_wp_error( $response ) ) {
 			wp_safe_redirect( add_query_arg( 'signup', rawurlencode( 'fail:' . $response->get_error_message() ), wp_get_referer() ) );
@@ -110,8 +112,9 @@ class Thessley_Module_IP_Sharing {
 		$response = wp_remote_post(
 			self::API . '/report',
 			array(
-				'timeout' => 10,
-				'headers' => array(
+				'timeout'    => 10,
+				'user-agent' => 'wp-thessley/' . THESSLEY_VERSION,
+				'headers'    => array(
 					'Content-Type' => 'application/json',
 					'X-API-Key'    => $key,
 				),

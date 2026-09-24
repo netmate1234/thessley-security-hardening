@@ -68,7 +68,9 @@ class Thessley_Module_Whitelist {
 			return;
 		}
 
-		$response = wp_remote_get( $url, array( 'timeout' => 20 ) );
+		// Explicit user-agent so this site's address isn't sent to whatever host
+		// the admin pointed the list at (WordPress' default one includes it).
+		$response = wp_remote_get( $url, array( 'timeout' => 20, 'user-agent' => 'wp-thessley/' . THESSLEY_VERSION ) );
 		if ( is_wp_error( $response ) || 200 !== wp_remote_retrieve_response_code( $response ) ) {
 			update_option(
 				'thessley_trusted_networks_remote_stats',

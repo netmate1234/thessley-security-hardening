@@ -304,6 +304,8 @@ if ( ! function_exists( 'thessley_maybe_telegram_alert' ) ) {
 			'https://api.telegram.org/bot' . rawurlencode( $token ) . '/sendMessage',
 			array(
 				'timeout'  => 3,
+				// The default WordPress user-agent embeds this site's address.
+				'user-agent' => 'wp-thessley',
 				// Fire-and-forget: this can run inside the early gate right
 				// before wp_die(), and a slow/unreachable Telegram API must
 				// never be what makes a blocked request hang.
@@ -472,6 +474,10 @@ if ( ! function_exists( 'thessley_maybe_unwantedip_report' ) ) {
 			'https://unwantedip.eagleeye-intelligence.com/api/v1/report',
 			array(
 				'timeout'  => 3,
+				// Own user-agent: WordPress' default one embeds this site's
+				// address, which reports deliberately never carry. No version
+				// suffix — THESSLEY_VERSION isn't defined this early.
+				'user-agent' => 'wp-thessley',
 				// Fire-and-forget, same reasoning as the Telegram call: this
 				// can run right before wp_die(), and a slow/unreachable
 				// remote API must never delay a blocked request.

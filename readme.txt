@@ -76,26 +76,63 @@ DB-IP's free Country Lite database (CC BY 4.0), refreshed automatically on a sch
 
 == External services ==
 
-This plugin can connect to several third-party services to power its blocking, geolocation, vulnerability-lookup, and alerting features. Activating the plugin makes no external request at all. Every third-party service below is only ever contacted after the site admin explicitly acts on the module that owns it — saving that module's settings, clicking its manual refresh button, or entering credentials for it. The one exception is WordPress.org's own API (api.wordpress.org), queried on File Integrity's and Vulnerability Scan's scheduled scans, never during activation itself.
+This plugin connects to third-party services to power its blocking, geolocation, vulnerability-lookup and alerting features. **Activating the plugin makes no external request.** Every service below is contacted only after the site admin acts on the module that owns it: saving that module's settings, clicking its refresh/test button, or entering credentials for it. The one exception is WordPress.org's own API (api.wordpress.org), which File Integrity and Vulnerability Scan query on their scheduled scans.
 
-**IP-reputation feeds (IP Blocklist module)** — plain-text lists of malicious IPs/ranges, fetched periodically and compiled into a local blocklist. Nothing about this site or its visitors is sent to any of these; each is a single anonymous HTTP GET for a public text file.
+For every service the entry says what it is, which server is contacted, whether an account is needed, what is sent and when, and links its Terms and Privacy Policy.
 
-* CINS Army list (opt-in; suggested when you first save IP Blocklist settings): `https://cinsscore.com/list/ci-badguys.txt`, operated by Sentinel IPS / Nomic Networks. A single anonymous HTTP GET for a public text file; no data about this site or its visitors is sent. Terms: https://sentinelips.com/terms — Privacy: https://sentinelips.com/privacy
-* SANS DShield block list (opt-in; suggested when you first save IP Blocklist settings): `https://feeds.dshield.org/block.txt`, operated by the SANS Internet Storm Center. About: https://www.dshield.org/about.html — Privacy: https://www.dshield.org/privacy.html
-* Spamhaus DROP (opt-in): `https://www.spamhaus.org/drop/drop.txt`. Fair Use Policy: https://www.spamhaus.org/blocklists/drop-fair-use-policy/ — Terms: https://www.spamhaus.org/terms-conditions/ — Privacy: https://www.spamhaus.org/privacy-notice/
-* FireHOL blocklist-ipsets levels 1 & 2, and the ET Tor exit-node list (opt-in): hosted on GitHub at `raw.githubusercontent.com/firehol/blocklist-ipsets`. These are the FireHOL project's own published data lists, and the only place they're distributed from besides the project's site: plain-text lists of IP addresses and CIDR ranges — not scripts, stylesheets, images or any other code. They're downloaded server-side through WordPress' HTTP API, parsed as text into a local range table, and never executed, rendered, or loaded by a visitor's browser. No account is needed. GitHub Terms: https://docs.github.com/en/site-policy/github-terms/github-terms-of-service — GitHub Privacy Statement: https://docs.github.com/en/site-policy/privacy-policies/github-privacy-statement
+**How requests identify themselves.** Requests to the feed, Jetpack, trusted-networks, unwantedip, WPScan and Telegram servers are sent with the User-Agent `wp-thessley/<version>` (or `wp-thessley`) so this site's address is not leaked in WordPress' default User-Agent. The DB-IP download and the api.wordpress.org calls use WordPress' standard User-Agent, which includes the site address, exactly as WordPress core's own update checks do.
 
-**DB-IP Country Lite (Geo Blocker / Geo Login modules)** — a compiled IP-to-country dataset, downloaded on a weekly schedule and looked up locally; no per-visitor data is ever sent to DB-IP. Used whenever Geo Blocker or Geo Login is enabled. Source: https://db-ip.com — Privacy: https://db-ip.com/privacy.php. Dataset licensed CC BY 4.0: https://creativecommons.org/licenses/by/4.0/
+= IP-reputation feeds (IP Blocklist module) =
 
-**api.wordpress.org (File Integrity and Vulnerability Scan modules)** — File Integrity fetches WordPress core's official published checksums to compare against this site's core files; Vulnerability Scan checks each installed plugin's status in the WordPress.org directory (still listed, closed, or long-unmaintained). Sent: File Integrity sends this site's WordPress version and locale (the same two values WordPress core itself sends for its own update checks); Vulnerability Scan sends the slug of each installed plugin being checked. Nothing else about this site. Privacy: https://wordpress.org/about/privacy/
+Plain-text lists of malicious IP addresses and ranges. The plugin downloads the chosen lists once a day (and when you click Refresh) and compiles them into a local blocklist that is checked on each request. Each is a single anonymous HTTP GET for a public text file. No account is needed, and nothing about this site or its visitors is sent. All feeds are opt-in: the source list starts empty and is only populated when you save the IP Blocklist settings.
 
-**Jetpack IP list (Query Guard module, opt-in)** — fetches Automattic's published Jetpack IP range list (`https://jetpack.com/ips-v4.txt`) so xmlrpc.php requests genuinely originating from Jetpack's own servers can be exempted from blocking. No data is sent beyond the request for the list itself. Automattic Terms: https://automattic.com/tos/ — Privacy: https://automattic.com/privacy/
+* **CINS Army list** — server `cinsscore.com` (`https://cinsscore.com/list/ci-badguys.txt`), operated by Sentinel IPS / Nomic Networks. Terms: https://sentinelips.com/terms — Privacy: https://sentinelips.com/privacy
+* **SANS DShield block list** — server `feeds.dshield.org` (`https://feeds.dshield.org/block.txt`), operated by the SANS Internet Storm Center. About: https://www.dshield.org/about.html — Privacy: https://www.dshield.org/privacy.html
+* **Spamhaus DROP** — server `www.spamhaus.org` (`https://www.spamhaus.org/drop/drop.txt`). Fair Use Policy: https://www.spamhaus.org/blocklists/drop-fair-use-policy/ — Terms: https://www.spamhaus.org/terms-conditions/ — Privacy: https://www.spamhaus.org/privacy-notice/
+* **FireHOL blocklist-ipsets (levels 1 and 2) and the ET Tor exit-node list** — server `raw.githubusercontent.com` (path `/firehol/blocklist-ipsets/master/`, three files). These are the FireHOL project's own published data lists, distributed from GitHub. Each is a plain-text list of IP addresses and CIDR ranges: no scripts, stylesheets, images or other code. They are downloaded server-side, parsed as text into a local range table, and never executed or loaded by a visitor's browser. GitHub Terms: https://docs.github.com/en/site-policy/github-terms/github-terms-of-service — Privacy: https://docs.github.com/en/site-policy/privacy-policies/github-privacy-statement
 
-**WPScan API (Vulnerability Scan module, opt-in — requires a free WPScan API token you provide)** — looks up known CVEs for the plugins/themes installed on this site. Sends: the slug of each installed plugin/theme being checked, and your WPScan API token, once per plugin/theme per 24 hours (results are cached). WPScan Terms: https://wpscan.com/terms/ — Automattic Privacy: https://automattic.com/privacy/
+= unwantedip.eagleeye-intelligence.com (IP Sharing module and IP Blocklist feed) =
 
-**Telegram Bot API (Alerts module, opt-in — requires a bot token and chat ID you provide)** — sends a message to a Telegram chat you control when a security event crosses the severity threshold you configure. Sends: the alert text (module, event type, severity, source IP) to api.telegram.org, only at the moment a qualifying alert fires. Telegram Terms: https://telegram.org/tos — Privacy: https://telegram.org/privacy
+A self-hosted IP-reputation tracker run by this plugin's author. Server: `unwantedip.eagleeye-intelligence.com`. It is used in three ways, all opt-in:
 
-**unwantedip.eagleeye-intelligence.com (IP Sharing module, opt-in — requires an API key you request)** — a self-hosted IP-reputation tracker run by this plugin's author, shared across sites that opt in. Sends: the blocked IP address, an event category, and a severity label, only when this site actually blocks a request (rate-limited to at most once per IP per hour). The same service can optionally be read back as an additional IP-reputation feed in IP Blocklist (`https://unwantedip.eagleeye-intelligence.com/api/v1/feed/wordpress`), which sends nothing — it's a read-only fetch. Terms: https://unwantedip.eagleeye-intelligence.com/terms.html — Privacy: https://unwantedip.eagleeye-intelligence.com/privacy-policy.html
+* **IP Sharing** requires an API key. **An account is needed, but it collects nothing personal:** clicking "Sign up for an API key" on the IP Sharing page creates one automatically from the IP address the request comes from (no name, email, site name or domain is asked for or sent). Once enabled, each time this site actually blocks a request it sends the blocked IP address, a short category (for example "WordPress Login Brute Force Attempt") and a severity label, with your API key, at most once per IP per hour. Nothing about this site, its domain, its users or its visitors' other activity is sent. **Reported IPs are public by design**: each reported address gets a public page on unwantedip, so only enable sharing if you are comfortable with that. The service's Privacy Policy explains this in full.
+* **Feed** (optional source in IP Blocklist): `https://unwantedip.eagleeye-intelligence.com/api/v1/feed/wordpress` is a read-only GET of the list of WordPress-targeting IPs. It requires the same API key, which is sent as a request header; nothing else is sent.
+* **Links**: the IP column of the Event Log and Bot Log links to `https://unwantedip.eagleeye-intelligence.com/ip/<ip>` in a new tab. Nothing is sent unless an admin clicks the link.
+
+Terms: https://unwantedip.eagleeye-intelligence.com/terms.html — Privacy: https://unwantedip.eagleeye-intelligence.com/privacy-policy.html
+
+= Trusted-networks list (Whitelist module) =
+
+An optional list of search-engine and monitoring-service IP ranges (`crawler-nets.conf`) that are exempted from blocking. The Whitelist page pre-fills the URL field with the author's hosted copy as a suggestion only; nothing is fetched until you save the page. Server: `wp-opsec.eagleeye-intelligence.com` (`https://wp-opsec.eagleeye-intelligence.com/wp-content/uploads/wp-opsec/crawler-nets.conf`), a static text file run by this plugin's author. You can replace the URL with your own, or clear it to turn remote fetching off. No account is needed. It is a single anonymous GET, refreshed daily and on demand, and nothing about this site or its visitors is sent beyond the request itself (the server's standard web-server access log records the requesting IP address and time). This static file has no separate Terms or Privacy page, since no account or data is collected; the author can be contacted at martin.lundstrom@gmail.com.
+
+= DB-IP Country Lite (Geo Blocker and Geo Login modules) =
+
+A compiled IP-to-country dataset. Server: `download.db-ip.com` (`https://download.db-ip.com/free/dbip-country-lite-YYYY-MM.csv.gz`). It is downloaded when you first save the Geo Blocker settings or click its Refresh button (Geo Login uses the same dataset), then refreshed weekly, and looked up locally, so no visitor IP address is ever sent to DB-IP. No account is needed. Nothing is sent beyond the download request itself. Source: https://db-ip.com — Privacy: https://db-ip.com/privacy.php — Dataset licensed CC BY 4.0: https://creativecommons.org/licenses/by/4.0/
+
+= api.wordpress.org (File Integrity and Vulnerability Scan modules) =
+
+WordPress.org's own API. No account is needed.
+
+* **File Integrity** fetches WordPress core's official checksums from `https://api.wordpress.org/core/checksums/1.0/` to compare against this site's core files. It sends this site's WordPress version and locale, the same two values core itself sends for its own update checks.
+* **Vulnerability Scan** queries `https://api.wordpress.org/plugins/info/1.0/<slug>.json` for each installed plugin to see whether it is still listed, closed or long unmaintained. It sends the slug of each installed plugin being checked, and nothing else about this site.
+
+Terms/Privacy: https://wordpress.org/about/privacy/
+
+= Jetpack IP list (Query Guard module) =
+
+Opt-in, only when XML-RPC blocking is enabled. Fetches Automattic's published Jetpack IP range list (`https://jetpack.com/ips-v4.txt`, server `jetpack.com`) so xmlrpc.php requests genuinely coming from Jetpack's own servers can be exempted. No account is needed and nothing is sent beyond the request for the list. Terms: https://automattic.com/tos/ — Privacy: https://automattic.com/privacy/
+
+= WPScan API (Vulnerability Scan module) =
+
+Opt-in. Adds known-CVE data for installed plugins and themes. Server: `wpscan.com` (`https://wpscan.com/api/v3/`). **An account is needed**: a free WPScan API token that you obtain yourself at https://wpscan.com/api and enter on the Vulnerability Scan page. Sent: the slug of each installed plugin/theme being checked and your API token, once per plugin/theme per 24 hours (results are cached). No other site data is sent. Terms: https://wpscan.com/terms/ — Privacy: https://automattic.com/privacy/
+
+= Telegram Bot API (Alerts module) =
+
+Opt-in. Sends a message to a Telegram chat you control when a security event exceeds the severity threshold you configure. Server: `api.telegram.org`. **An account is needed**: a Telegram bot token (from @BotFather) and a chat ID that you provide. Sent, only when a qualifying event fires (or when you press "Send test"): the site name and domain, the module and event name, the action taken, the offending IP address, a short detail string and a timestamp. Terms: https://telegram.org/tos — Privacy: https://telegram.org/privacy
+
+= Email alerts (Alerts module) =
+
+Opt-in. Uses this site's own mail system, not a third-party service, so nothing is sent to any server listed here.
 
 == Changelog ==
 

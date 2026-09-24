@@ -32,7 +32,7 @@ class Thessley_Module_Alerts {
 	private static function api_call( $token, $method, $args = array() ) {
 		$response = wp_remote_post(
 			self::API . rawurlencode( $token ) . '/' . $method,
-			array( 'timeout' => 10, 'body' => $args )
+			array( 'timeout' => 10, 'user-agent' => 'wp-thessley/' . THESSLEY_VERSION, 'body' => $args )
 		);
 
 		if ( is_wp_error( $response ) ) {

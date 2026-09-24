@@ -172,8 +172,9 @@ class Thessley_Module_Vuln_Scanner {
 			$response = wp_remote_get(
 				self::WPSCAN_API . 'plugins/' . rawurlencode( $c['slug'] ),
 				array(
-					'timeout' => 20,
-					'headers' => array( 'Authorization' => 'Token token=' . $token ),
+					'timeout'    => 20,
+					'user-agent' => 'wp-thessley/' . THESSLEY_VERSION,
+					'headers'    => array( 'Authorization' => 'Token token=' . $token ),
 				)
 			);
 
