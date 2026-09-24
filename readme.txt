@@ -4,7 +4,7 @@ Tags: security, firewall, malware, geo-blocking, brute-force
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.18
+Stable tag: 1.0.19
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -150,6 +150,13 @@ Opt-in. Sends a message to a Telegram chat you control when a security event exc
 Opt-in. Uses this site's own mail system, not a third-party service, so nothing is sent to any server listed here.
 
 == Changelog ==
+
+= 1.0.19 =
+* Nothing but a single must-use loader is written into wp-content any more. The per-module check files are no longer copied into wp-content/mu-plugins/wp-thessley-checks: the loader requires each enabled module's check.php directly from the plugin folder.
+* Compiled datasets (IP-blocklist ranges, geo-country index, trusted-networks list) moved to wp-content/uploads/thessley-security-hardening/, located with wp_upload_dir() and protected from direct access. They are now plain data (binary, JSON, text), never PHP. Existing installs are migrated once, without re-downloading anything.
+* Added uninstall.php (removes the uploads data folder) and a readme FAQ on exactly what the plugin writes and where.
+* readme: the External services section now lists, for every service, what it is, the server contacted, whether an account is needed, what is sent and when, and its Terms/Privacy links, including the trusted-networks host and the outbound unwantedip links.
+* Requests the plugin makes itself (feeds, Jetpack, trusted-networks, WPScan, Telegram, unwantedip) now send a `wp-thessley` User-Agent instead of WordPress' default, which embeds the site address.
 
 = 1.0.18 =
 * The local blocklist is no longer mirrored into a generated PHP range file under wp-content/mu-plugins. That file only ever held exact single IPs already keyed by address in the thessley_local_blocklist option, so the early gate now checks the option directly (autoloaded, no extra query) and the plugin no longer writes any generated executable PHP from the request path at all. A leftover copy from an earlier version is removed once on upgrade.
