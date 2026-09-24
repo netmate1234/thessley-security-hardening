@@ -10,10 +10,6 @@ class Thessley_Module_IP_Blocklist {
 
 	const CRON_HOOK = 'thessley_ip_blocklist_refresh';
 
-	public static function check_dest() {
-		return THESSLEY_CHECKS_DIR . '/ip-blocklist.php';
-	}
-
 	public static function activate() {
 		self::deploy_check_file();
 
@@ -32,9 +28,7 @@ class Thessley_Module_IP_Blocklist {
 	public static function deactivate() {
 		wp_clear_scheduled_hook( self::CRON_HOOK );
 
-		if ( file_exists( self::check_dest() ) ) {
-			Thessley_Module_Loader::fs_delete( self::check_dest() );
-		}
+		Thessley_Module_Loader::unregister_check( 'ip-blocklist' );
 	}
 
 	public static function register() {
@@ -73,23 +67,9 @@ class Thessley_Module_IP_Blocklist {
 	}
 
 	private static function deploy_check_file() {
-		$dir = dirname( self::check_dest() );
-		if ( ! file_exists( $dir ) ) {
-			wp_mkdir_p( $dir );
-		}
-
-		$source = __DIR__ . '/check.php';
-		if ( ! file_exists( self::check_dest() ) || md5_file( self::check_dest() ) !== md5_file( $source ) ) {
-			Thessley_Module_Loader::fs_copy( $source, self::check_dest(), true );
-			// Without this, a worker process that already opcache-compiled the
-			// old bytecode can keep serving stale check logic across multiple
-			// requests until that cache entry's own revalidation timer fires —
-			// a real, confirmed-live gap (hit an actual admin session's request
-			// once via the mu-loader's own version of this same miss).
-			if ( function_exists( 'opcache_invalidate' ) ) {
-				opcache_invalidate( self::check_dest(), true );
-			}
-		}
+		// Enables this module's early-gate check. The mu-loader requires the
+		// check.php in this folder directly, so there is nothing to copy.
+		Thessley_Module_Loader::register_check( 'ip-blocklist' );
 	}
 
 

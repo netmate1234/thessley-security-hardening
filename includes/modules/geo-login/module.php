@@ -18,18 +18,12 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class Thessley_Module_Geo_Login {
 
-	public static function check_dest() {
-		return THESSLEY_CHECKS_DIR . '/geo-login.php';
-	}
-
 	public static function activate() {
 		self::deploy_check_file();
 	}
 
 	public static function deactivate() {
-		if ( file_exists( self::check_dest() ) ) {
-			Thessley_Module_Loader::fs_delete( self::check_dest() );
-		}
+		Thessley_Module_Loader::unregister_check( 'geo-login' );
 	}
 
 	public static function register() {
@@ -39,22 +33,9 @@ class Thessley_Module_Geo_Login {
 	}
 
 	private static function deploy_check_file() {
-		$dir = dirname( self::check_dest() );
-		if ( ! file_exists( $dir ) ) {
-			wp_mkdir_p( $dir );
-		}
-		$source = __DIR__ . '/check.php';
-		if ( ! file_exists( self::check_dest() ) || md5_file( self::check_dest() ) !== md5_file( $source ) ) {
-			Thessley_Module_Loader::fs_copy( $source, self::check_dest(), true );
-			// Without this, a worker process that already opcache-compiled the
-			// old bytecode can keep serving stale check logic across multiple
-			// requests until that cache entry's own revalidation timer fires —
-			// a real, confirmed-live gap (hit an actual admin session's request
-			// once via the mu-loader's own version of this same miss).
-			if ( function_exists( 'opcache_invalidate' ) ) {
-				opcache_invalidate( self::check_dest(), true );
-			}
-		}
+		// Enables this module's early-gate check. The mu-loader requires the
+		// check.php in this folder directly, so there is nothing to copy.
+		Thessley_Module_Loader::register_check( 'geo-login' );
 	}
 
 	public static function handle_save_settings() {

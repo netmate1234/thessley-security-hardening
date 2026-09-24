@@ -70,6 +70,15 @@ Every blocking module exempts your LAN, reserved/private IP space, and anything 
 
 The early-request checks (IP Blocklist, Geo Blocker, Geo Login, Rate Limiter, Query Guard's query-string scan) run as a must-use plugin before WordPress finishes bootstrapping, using compiled binary-search lookups rather than database queries — no per-request network calls, no per-request external API hits.
 
+= What files does this plugin write, and where? =
+
+Two places, both created by the plugin itself and both removed when it is deleted (the loader file also when you deactivate it):
+
+1. `wp-content/mu-plugins/wp-thessley-early.php` — a single small must-use plugin. This is what lets the blocking modules run before WordPress and other plugins load, the same reason caching plugins install a drop-in. It contains no site-specific data and is a copy of `mu-loader/wp-thessley-early.php` inside this plugin. It loads each enabled module's `check.php` directly from this plugin's folder, so nothing else is copied into wp-content. If `mu-plugins` isn't writable, the plugin still works, but early blocking is off and an admin notice says so.
+2. `wp-content/uploads/thessley-security-hardening/` — compiled datasets (the merged IP-blocklist ranges, the geo-country index, the trusted-networks list), located with `wp_upload_dir()` and protected from direct web access with `.htaccess` and an `index.php`. They are plain data files (binary, JSON and text), never PHP, and nothing in this folder is executed.
+
+Everything else (settings, the local blocklist, the event log) is stored in the database. The plugin never writes to WordPress core folders, its own plugin folder, or other plugins' or themes' folders.
+
 = Where does the geo data come from? =
 
 DB-IP's free Country Lite database (CC BY 4.0), refreshed automatically on a schedule.

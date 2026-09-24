@@ -3,8 +3,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-// Copied verbatim into wp-content/mu-plugins/wp-thessley-checks/ by the
-// rate-limiter module on activation. Runs inside wp-thessley-early.php.
+// Required from this plugin's own folder by wp-thessley-early.php while this
+// module is enabled.
 //
 // Fixed 60-second window per IP, via transient. This only ever sees
 // requests that reach PHP at all — the same fact that limits sensitive-path

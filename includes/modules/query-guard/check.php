@@ -3,8 +3,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-// Copied verbatim into wp-content/mu-plugins/wp-thessley-checks/ by the
-// query-guard module on activation. Runs inside wp-thessley-early.php.
+// Required from this plugin's own folder by wp-thessley-early.php while this
+// module is enabled.
 //
 // Scoped to the GET query string only, never POST bodies — POST carries
 // legitimate rich content (block editor HTML, REST payloads) that would

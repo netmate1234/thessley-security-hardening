@@ -55,7 +55,7 @@ class Thessley_Module_Geo_Map {
 
 		$by_country = array();
 		$geo_ready  = function_exists( 'thessley_geo_lookup' ) && function_exists( 'thessley_geo_country_label' );
-		$file       = WPMU_PLUGIN_DIR . '/wp-thessley-checks/data/geo-country-index.bin';
+		$file       = function_exists( 'thessley_data_file' ) ? thessley_data_file( 'geo-country-index.bin' ) : '';
 
 		foreach ( $rows as $row ) {
 			if ( ! $geo_ready || thessley_ip_is_reserved( $row['ip'] ) ) {

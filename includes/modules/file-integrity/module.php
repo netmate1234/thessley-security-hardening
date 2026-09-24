@@ -171,13 +171,6 @@ class Thessley_Module_File_Integrity {
 						continue;
 					}
 					$path = self::relative_path( $file->getPathname() );
-					if ( false !== strpos( $path, '/wp-thessley-checks/data/' ) ) {
-						// Compiled data this plugin regenerates on its own schedule
-						// (IP-reputation ranges daily, local-blocklist ranges on every
-						// new escalation, geo country names on refresh) — a diff here
-						// is expected behavior, not drift worth an alert.
-						continue;
-					}
 					$files[ $path ] = self::file_info( $file->getPathname() );
 				}
 			} catch ( Exception $e ) {

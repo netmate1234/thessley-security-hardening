@@ -3,8 +3,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-// Copied verbatim into wp-content/mu-plugins/wp-thessley-checks/ by the
-// geo-blocker module on activation. Runs inside wp-thessley-early.php.
+// Required from this plugin's own folder by wp-thessley-early.php while the
+// geo-blocker module is enabled.
 //
 // Binary search over a flat file of fixed 9-byte records (4-byte start,
 // 4-byte end, 1-byte country index) rather than loading ~358,000 ranges
@@ -27,6 +27,10 @@ if ( ! function_exists( 'thessley_geo_lookup' ) ) {
 		static $opened_path = null;
 		static $count = null;
 		$record_size = 9; // 4-byte start + 4-byte end + 1-byte country index
+
+		if ( '' === $file ) {
+			return null; // data folder not created yet
+		}
 
 		if ( $opened_path !== $file ) {
 			if ( is_resource( $fh ) ) {
@@ -75,8 +79,9 @@ if ( ! function_exists( 'thessley_geo_country_label' ) ) {
 	function thessley_geo_country_label( $idx ) {
 		static $labels = null;
 		if ( null === $labels ) {
-			$file   = WPMU_PLUGIN_DIR . '/wp-thessley-checks/data/geo-country-names.php';
-			$labels = is_readable( $file ) ? (array) include $file : array();
+			$file    = thessley_data_file( 'geo-country-names.json' );
+			$decoded = ( '' !== $file && is_readable( $file ) ) ? json_decode( (string) file_get_contents( $file ), true ) : null;
+			$labels  = is_array( $decoded ) ? $decoded : array();
 		}
 		return $labels[ $idx ] ?? "index {$idx}";
 	}
@@ -99,8 +104,7 @@ thessley_register_check(
 			return null;
 		}
 
-		$file = WPMU_PLUGIN_DIR . '/wp-thessley-checks/data/geo-country-index.bin';
-		$idx  = thessley_geo_lookup( $file, $needle );
+		$idx = thessley_geo_lookup( thessley_data_file( 'geo-country-index.bin' ), $needle );
 		if ( null === $idx ) {
 			return null; // unknown to the dataset — fail open, not closed
 		}

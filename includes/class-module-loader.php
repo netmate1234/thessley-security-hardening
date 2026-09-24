@@ -242,8 +242,9 @@ class Thessley_Module_Loader {
 
 	public static function init() {
 		self::migrate_legacy_identifiers();
-		self::remove_obsolete_data_files();
+		self::sync_plugin_folder();
 		self::ensure_mu_loader_current();
+		self::migrate_data_to_uploads();
 
 		// The mu-plugin WordPress loaded this request is whatever was on disk
 		// when the request started. Right after a plugin update that's the
@@ -269,6 +270,7 @@ class Thessley_Module_Loader {
 
 	public static function activate() {
 		self::migrate_legacy_identifiers();
+		self::sync_plugin_folder();
 		self::copy_mu_loader();
 
 		// Guarantee the shared helpers (thessley_local_blocklist_add() etc.)
@@ -920,20 +922,184 @@ class Thessley_Module_Loader {
 	}
 
 	/**
-	 * The local blocklist used to be mirrored into a generated PHP range
-	 * file under mu-plugins; it's now read straight from its option (see
-	 * thessley_local_blocklist_has()), so any copy left behind by an earlier
-	 * version is dead weight. Runs once per site.
+	 * Which of the per-module early-gate check files should run. The
+	 * mu-plugin loader requires each listed module's check.php straight
+	 * from this plugin's own folder, so nothing but the loader itself is
+	 * ever copied into wp-content. Only the module slug is stored (the
+	 * loader re-validates it and only ever builds a path from a fixed
+	 * directory plus that slug), never a path.
 	 */
-	private static function remove_obsolete_data_files() {
-		if ( get_option( 'thessley_local_file_removed' ) ) {
+	public static function register_check( $slug ) {
+		$active = get_option( 'thessley_active_checks', array() );
+		$active = is_array( $active ) ? $active : array();
+		if ( ! in_array( $slug, $active, true ) ) {
+			$active[] = $slug;
+			update_option( 'thessley_active_checks', array_values( $active ) );
+		}
+	}
+
+	public static function unregister_check( $slug ) {
+		$active = get_option( 'thessley_active_checks', array() );
+		$active = is_array( $active ) ? $active : array();
+		if ( in_array( $slug, $active, true ) ) {
+			update_option( 'thessley_active_checks', array_values( array_diff( $active, array( $slug ) ) ) );
+		}
+	}
+
+	/**
+	 * The early-gate loader finds this plugin's check files under
+	 * WP_PLUGIN_DIR by folder name; the folder is normally the slug, but
+	 * it is recorded rather than assumed.
+	 */
+	private static function sync_plugin_folder() {
+		$folder = basename( untrailingslashit( THESSLEY_PLUGIN_DIR ) );
+		if ( get_option( 'thessley_plugin_folder' ) !== $folder ) {
+			update_option( 'thessley_plugin_folder', $folder );
+		}
+	}
+
+	/**
+	 * Compiled datasets (IP ranges, geo index, trusted networks) live in
+	 * wp-content/uploads/thessley-security-hardening/, resolved with
+	 * wp_upload_dir() and shielded from direct web access. The early gate
+	 * runs before plugins load, where filters on the uploads location may
+	 * not be registered yet, so the resolved path is stored in an option
+	 * for it to read back rather than recomputed.
+	 *
+	 * Only ever called by code that writes data; readers use
+	 * thessley_data_file() from the mu-loader. Returns '' when the uploads
+	 * directory cannot be used, in which case callers skip the write.
+	 */
+	public static function data_dir() {
+		$uploads = wp_upload_dir( null, false );
+		if ( ! empty( $uploads['error'] ) || empty( $uploads['basedir'] ) ) {
+			return '';
+		}
+
+		$dir = untrailingslashit( $uploads['basedir'] ) . '/thessley-security-hardening';
+		if ( ! is_dir( $dir ) && ! wp_mkdir_p( $dir ) ) {
+			return '';
+		}
+
+		if ( ! file_exists( $dir . '/index.php' ) ) {
+			self::fs_put_contents( $dir . '/index.php', "<?php\n// Silence is golden.\n" );
+		}
+		if ( ! file_exists( $dir . '/.htaccess' ) ) {
+			self::fs_put_contents(
+				$dir . '/.htaccess',
+				"Options -Indexes\n<IfModule mod_authz_core.c>\nRequire all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\nOrder allow,deny\nDeny from all\n</IfModule>\n"
+			);
+		}
+
+		if ( get_option( 'thessley_data_dir' ) !== $dir ) {
+			update_option( 'thessley_data_dir', $dir );
+		}
+
+		return $dir;
+	}
+
+	/** @return string full path for a compiled data file, or '' if the data directory is unavailable */
+	public static function data_file( $name ) {
+		$dir = self::data_dir();
+		return '' === $dir ? '' : $dir . '/' . $name;
+	}
+
+	/**
+	 * Packs sorted [start, end] IPv4 integer pairs into a flat binary
+	 * string, 8 bytes per range (two big-endian uint32s). The early gate
+	 * binary-searches it in place; it is data, not code, so nothing in
+	 * the uploads folder is ever executed.
+	 *
+	 * @param array<int, array{0:int,1:int}> $ranges
+	 */
+	public static function pack_ranges( array $ranges ) {
+		$out = '';
+		foreach ( $ranges as $r ) {
+			$out .= pack( 'NN', $r[0], $r[1] );
+		}
+		return $out;
+	}
+
+	/**
+	 * Atomic-ish write of a compiled data file: temp file then rename, so
+	 * the early gate never reads a half-written one.
+	 */
+	public static function write_data_file( $name, $contents ) {
+		$file = self::data_file( $name );
+		if ( '' === $file ) {
+			return false;
+		}
+		$tmp = $file . '.tmp-' . wp_generate_password( 8, false );
+		if ( ! self::fs_put_contents( $tmp, $contents ) ) {
+			return false;
+		}
+		return self::fs_move( $tmp, $file, true );
+	}
+
+	/**
+	 * One-time move of everything earlier versions kept under
+	 * wp-content/mu-plugins/wp-thessley-checks/ (the copied check files
+	 * plus data/, which used PHP array files) into the uploads data
+	 * directory in its current non-PHP formats, then removes the old
+	 * folder. Nothing is re-downloaded: the geo index and trusted-networks
+	 * list are moved, the PHP array files are converted.
+	 */
+	private static function migrate_data_to_uploads() {
+		if ( get_option( 'thessley_data_moved' ) ) {
 			return;
 		}
-		$old = THESSLEY_CHECKS_DIR . '/data/local-blocklist-ranges.php';
-		if ( file_exists( $old ) ) {
-			self::fs_delete( $old );
+
+		$old = THESSLEY_CHECKS_DIR . '/data';
+		if ( is_dir( $old ) ) {
+			$dir = self::data_dir();
+			if ( '' === $dir ) {
+				return; // uploads not usable right now; try again next request
+			}
+
+			if ( file_exists( $old . '/geo-country-index.bin' ) && ! file_exists( $dir . '/geo-country-index.bin' ) ) {
+				self::fs_move( $old . '/geo-country-index.bin', $dir . '/geo-country-index.bin', true );
+			}
+			if ( file_exists( $old . '/trusted-networks-remote.conf' ) && ! file_exists( $dir . '/trusted-networks-remote.conf' ) ) {
+				self::fs_move( $old . '/trusted-networks-remote.conf', $dir . '/trusted-networks-remote.conf', true );
+			}
+
+			// These are this plugin's own previously generated files (arrays
+			// of integers/labels), read once here purely to convert them.
+			if ( file_exists( $old . '/ip-blocklist-ranges.php' ) ) {
+				$ranges = include $old . '/ip-blocklist-ranges.php';
+				if ( is_array( $ranges ) ) {
+					self::write_data_file( 'ip-blocklist-ranges.bin', self::pack_ranges( $ranges ) );
+				}
+			}
+			if ( file_exists( $old . '/ip-blocklist-by-source.php' ) ) {
+				$by_source = include $old . '/ip-blocklist-by-source.php';
+				if ( is_array( $by_source ) ) {
+					$encoded = array();
+					foreach ( $by_source as $label => $ranges ) {
+						$encoded[ $label ] = base64_encode( self::pack_ranges( $ranges ) );
+					}
+					self::write_data_file( 'ip-blocklist-by-source.json', wp_json_encode( $encoded ) );
+				}
+			}
+			if ( file_exists( $old . '/trusted-networks-by-source.php' ) ) {
+				$by_heading = include $old . '/trusted-networks-by-source.php';
+				if ( is_array( $by_heading ) ) {
+					self::write_data_file( 'trusted-networks-by-source.json', wp_json_encode( $by_heading ) );
+				}
+			}
+			if ( file_exists( $old . '/geo-country-names.php' ) ) {
+				$names = include $old . '/geo-country-names.php';
+				if ( is_array( $names ) ) {
+					self::write_data_file( 'geo-country-names.json', wp_json_encode( $names ) );
+				}
+			}
 		}
-		update_option( 'thessley_local_file_removed', 1 );
+
+		if ( is_dir( THESSLEY_CHECKS_DIR ) ) {
+			self::fs_delete( THESSLEY_CHECKS_DIR, true );
+		}
+
+		update_option( 'thessley_data_moved', 1 );
 	}
 
 	/**

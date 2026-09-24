@@ -207,7 +207,7 @@ class Thessley_Module_Event_Log {
 		}
 
 		if ( function_exists( 'thessley_geo_lookup' ) && function_exists( 'thessley_geo_country_label' ) ) {
-			$file = WPMU_PLUGIN_DIR . '/wp-thessley-checks/data/geo-country-index.bin';
+			$file = thessley_data_file( 'geo-country-index.bin' );
 			$long = ip2long( $ip );
 			if ( false !== $long ) {
 				$idx = thessley_geo_lookup( $file, $long );

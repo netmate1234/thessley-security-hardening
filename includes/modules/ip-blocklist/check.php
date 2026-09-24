@@ -3,18 +3,19 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-// Copied verbatim into wp-content/mu-plugins/wp-thessley-checks/ by the
-// ip-blocklist module on activation. Runs inside wp-thessley-early.php.
+// Required from this plugin's own folder by wp-thessley-early.php while this
+// module is enabled.
 
 thessley_register_check(
 	function () {
 		static $ranges = null;
 
+		// Flat binary file of 8-byte [start, end] records, searched in place.
 		if ( null === $ranges ) {
-			$data_file = __DIR__ . '/data/ip-blocklist-ranges.php';
-			$ranges    = file_exists( $data_file ) ? require $data_file : array();
+			$data_file = thessley_data_file( 'ip-blocklist-ranges.bin' );
+			$ranges    = ( '' !== $data_file && is_readable( $data_file ) ) ? (string) file_get_contents( $data_file ) : '';
 		}
-		if ( empty( $ranges ) && ! get_option( 'thessley_local_blocklist', array() ) ) {
+		if ( '' === $ranges && ! get_option( 'thessley_local_blocklist', array() ) ) {
 			return null;
 		}
 
@@ -37,7 +38,7 @@ thessley_register_check(
 		if ( thessley_local_blocklist_has( $ip ) ) {
 			$source = 'local';
 			$label  = 'local blocklist';
-		} elseif ( thessley_ip_in_ranges( $needle, $ranges ) ) {
+		} elseif ( thessley_ip_in_packed_ranges( $needle, $ranges ) ) {
 			$source     = 'reputation list';
 			$src_labels = thessley_ip_reputation_sources( $needle );
 			$label      = $src_labels ? implode( ', ', $src_labels ) : 'reputation list';
@@ -75,13 +76,14 @@ if ( ! function_exists( 'thessley_ip_reputation_sources' ) ) {
 	function thessley_ip_reputation_sources( $needle ) {
 		static $by_source = null;
 		if ( null === $by_source ) {
-			$file      = __DIR__ . '/data/ip-blocklist-by-source.php';
-			$by_source = file_exists( $file ) ? require $file : array();
+			$file      = thessley_data_file( 'ip-blocklist-by-source.json' );
+			$decoded   = ( '' !== $file && is_readable( $file ) ) ? json_decode( (string) file_get_contents( $file ), true ) : null;
+			$by_source = is_array( $decoded ) ? $decoded : array();
 		}
 
 		$labels = array();
 		foreach ( $by_source as $label => $source_ranges ) {
-			if ( thessley_ip_in_ranges( $needle, $source_ranges ) ) {
+			if ( thessley_ip_in_packed_ranges( $needle, (string) base64_decode( $source_ranges ) ) ) {
 				$labels[] = $label;
 			}
 		}
@@ -89,19 +91,22 @@ if ( ! function_exists( 'thessley_ip_reputation_sources' ) ) {
 	}
 }
 
-if ( ! function_exists( 'thessley_ip_in_ranges' ) ) {
-	/** @param array<int, array{0:int,1:int}> $ranges sorted, non-overlapping */
-	function thessley_ip_in_ranges( $needle, array $ranges ) {
+if ( ! function_exists( 'thessley_ip_in_packed_ranges' ) ) {
+	/**
+	 * @param int    $needle IPv4 as an integer.
+	 * @param string $packed Sorted, non-overlapping ranges, 8 bytes each: big-endian uint32 start then end.
+	 */
+	function thessley_ip_in_packed_ranges( $needle, $packed ) {
 		$lo = 0;
-		$hi = count( $ranges ) - 1;
+		$hi = (int) ( strlen( $packed ) / 8 ) - 1;
 
 		while ( $lo <= $hi ) {
 			$mid   = (int) ( ( $lo + $hi ) / 2 );
-			$range = $ranges[ $mid ];
+			$range = unpack( 'Nstart/Nend', substr( $packed, $mid * 8, 8 ) );
 
-			if ( $needle < $range[0] ) {
+			if ( $needle < $range['start'] ) {
 				$hi = $mid - 1;
-			} elseif ( $needle > $range[1] ) {
+			} elseif ( $needle > $range['end'] ) {
 				$lo = $mid + 1;
 			} else {
 				return true;

@@ -3,8 +3,8 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-// Copied verbatim into wp-content/mu-plugins/wp-thessley-checks/ by the
-// geo-login module on activation. Runs inside wp-thessley-early.php.
+// Required from this plugin's own folder by wp-thessley-early.php while this
+// module is enabled.
 //
 // Reuses geo-blocker's compiled country index and lookup function
 // (thessley_geo_lookup(), defined by geo-blocker's own check file) rather
@@ -55,8 +55,7 @@ thessley_register_check(
 			return null;
 		}
 
-		$file = WPMU_PLUGIN_DIR . '/wp-thessley-checks/data/geo-country-index.bin';
-		$idx  = thessley_geo_lookup( $file, $needle );
+		$idx = thessley_geo_lookup( thessley_data_file( 'geo-country-index.bin' ), $needle );
 		if ( null === $idx || in_array( $idx, $indices, true ) ) {
 			return null; // unknown IP (fail open) or an allowed country
 		}

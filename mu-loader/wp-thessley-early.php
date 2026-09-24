@@ -8,9 +8,12 @@ if ( ! defined( 'ABSPATH' ) ) {
  *
  * Deployed as a must-use plugin so it runs before the rest of WordPress
  * bootstraps. Self-contained: does not depend on the main wp-thessley plugin
- * being loaded (mu-plugins load first). Modules drop individual check
- * files into wp-content/mu-plugins/wp-thessley-checks/*.php; each such file
- * calls thessley_register_check() to add itself.
+ * being loaded (mu-plugins load first). Every enabled module has a check.php
+ * inside the plugin's own folder; this file requires each one (see the end
+ * of the file) and each calls thessley_register_check() to add itself. This
+ * is the only file the plugin places in wp-content. Compiled datasets are
+ * read from wp-content/uploads/thessley-security-hardening/ — see
+ * thessley_data_file().
  *
  * Kill switch: define('THESSLEY_DISABLE', true) in wp-config.php to bypass
  * the gate below if a check ever misfires.
@@ -42,6 +45,24 @@ if ( ! function_exists( 'thessley_register_check' ) ) {
 		global $thessley_checks;
 		static $seq = 0;
 		$thessley_checks[] = array( 'priority' => $priority, 'seq' => $seq++, 'check' => $check );
+	}
+}
+
+if ( ! function_exists( 'thessley_data_file' ) ) {
+	/**
+	 * Full path of a compiled data file in the plugin's uploads folder, or ''
+	 * when the folder has not been created yet. The folder path is stored
+	 * (not recomputed) because this runs before plugins load, when filters
+	 * on the uploads location may not be registered yet.
+	 *
+	 * @param string $name File name inside the folder, e.g. 'geo-country-index.bin'.
+	 */
+	function thessley_data_file( $name ) {
+		$dir = get_option( 'thessley_data_dir', '' );
+		if ( ! is_string( $dir ) || '' === $dir || 'thessley-security-hardening' !== basename( $dir ) ) {
+			return '';
+		}
+		return $dir . '/' . $name;
 	}
 }
 
@@ -580,7 +601,7 @@ if ( ! function_exists( 'thessley_trusted_networks_remote_file' ) ) {
 	 * each server needing its own local copy kept in sync by hand.
 	 */
 	function thessley_trusted_networks_remote_file() {
-		return WPMU_PLUGIN_DIR . '/wp-thessley-checks/data/trusted-networks-remote.conf';
+		return thessley_data_file( 'trusted-networks-remote.conf' );
 	}
 }
 
@@ -669,7 +690,7 @@ if ( ! function_exists( 'thessley_trusted_ranges' ) ) {
 
 if ( ! function_exists( 'thessley_trusted_networks_by_source_file' ) ) {
 	function thessley_trusted_networks_by_source_file() {
-		return WPMU_PLUGIN_DIR . '/wp-thessley-checks/data/trusted-networks-by-source.php';
+		return thessley_data_file( 'trusted-networks-by-source.json' );
 	}
 }
 
@@ -679,7 +700,11 @@ if ( ! function_exists( 'thessley_trusted_network_source' ) ) {
 		static $by_heading = null;
 		if ( null === $by_heading ) {
 			$file       = thessley_trusted_networks_by_source_file();
-			$by_heading = file_exists( $file ) ? require $file : array();
+			$by_heading = array();
+			if ( '' !== $file && is_readable( $file ) ) {
+				$decoded    = json_decode( (string) file_get_contents( $file ), true );
+				$by_heading = is_array( $decoded ) ? $decoded : array();
+			}
 		}
 		foreach ( $by_heading as $heading => $ranges ) {
 			foreach ( $ranges as $r ) {
@@ -886,9 +911,21 @@ $GLOBALS['thessley_checks'] = array();
 // top-level variables here would otherwise leak into the global PHP
 // namespace for the rest of the request.
 ( function () {
-	$checks_dir = WPMU_PLUGIN_DIR . '/wp-thessley-checks';
-	foreach ( glob( $checks_dir . '/*.php' ) ?: array() as $check_file ) {
-		require $check_file;
+	// The plugin's folder name and the list of enabled modules come from
+	// options, but never as a path: the folder must be a plain directory
+	// name and each module a plain slug, joined onto WP_PLUGIN_DIR, so a
+	// tampered option can't make this require anything outside the plugin.
+	$folder = get_option( 'thessley_plugin_folder', '' );
+	$slugs  = get_option( 'thessley_active_checks', array() );
+	if ( is_string( $folder ) && preg_match( '/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/', $folder ) && is_array( $slugs ) ) {
+		// Alphabetical by slug: the same order the old per-file glob() gave.
+		sort( $slugs );
+		foreach ( $slugs as $slug ) {
+			$check_file = WP_PLUGIN_DIR . '/' . $folder . '/includes/modules/' . $slug . '/check.php';
+			if ( is_string( $slug ) && preg_match( '/^[a-z0-9-]+$/', $slug ) && is_readable( $check_file ) ) {
+				require $check_file;
+			}
+		}
 	}
 
 	usort(
