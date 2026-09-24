@@ -181,6 +181,15 @@ if ( ! function_exists( 'thessley_query_guard_path_patterns' ) ) {
 			// visitor ever needs to fetch these directly — WordPress.org's
 			// own parser reads the file server-side, not over HTTP.
 			array( 'id' => 'path_plugin_theme_readme_probe', 'regex' => '#/wp-content/(?<component>plugins|mu-plugins|themes)/(?<slug>[^/]+)/(?:readme|changelog)\.(?:txt|md)(?:$|[/?])#i' ),
+			// WordPress fingerprinting: /wp-includes/wlwmanifest.xml was the
+			// Windows Live Writer discovery file, dropped from core, so a
+			// current install just 404s — but a hit on it is still a reliable
+			// "is this WordPress?" probe, and scanners guess it under every
+			// plausible subfolder (//blog/, //wp/, //sito/, /wp-login.php/...).
+			// Matched on the filename alone, not its full path, so those
+			// blind-guess prefixes can't dodge it. Without this, only a
+			// country/IP filter ever saw it; a site with neither logged nothing.
+			array( 'id' => 'path_wlwmanifest_probe', 'regex' => '#/wlwmanifest\.xml(?:$|[/?])#i' ),
 		);
 	}
 
