@@ -101,9 +101,15 @@ A self-hosted IP-reputation tracker run by this plugin's author. Server: `unwant
 
 Terms: https://unwantedip.eagleeye-intelligence.com/terms.html — Privacy: https://unwantedip.eagleeye-intelligence.com/privacy-policy.html
 
-= Trusted-networks list (Whitelist module) =
+= wp-opsec.eagleeye-intelligence.com (Whitelist module: trusted-networks list) =
 
-An optional list of search-engine and monitoring-service IP ranges (`crawler-nets.conf`) that are exempted from blocking. The Whitelist page pre-fills the URL field with the author's hosted copy as a suggestion only; nothing is fetched until you save the page. Server: `wp-opsec.eagleeye-intelligence.com` (`https://wp-opsec.eagleeye-intelligence.com/wp-content/uploads/wp-opsec/crawler-nets.conf`), a static text file run by this plugin's author. You can replace the URL with your own, or clear it to turn remote fetching off. No account is needed. It is a single anonymous GET, refreshed daily and on demand, and nothing about this site or its visitors is sent beyond the request itself (the server's standard web-server access log records the requesting IP address and time). This static file has no separate Terms or Privacy page, since no account or data is collected; the author can be contacted at martin.lundstrom@gmail.com.
+A service run by this plugin's author that publishes `crawler-nets.conf`, a plain-text list of the IP ranges used by legitimate search-engine, AI and monitoring crawlers (Google, Bing, DuckDuckGo, OpenAI, Cloudflare and others), updated automatically from those operators' own published ranges. The Whitelist module uses it so genuine crawlers are not blocked by the other modules.
+
+* **Server contacted:** `wp-opsec.eagleeye-intelligence.com`, one file: `https://wp-opsec.eagleeye-intelligence.com/wp-content/uploads/wp-opsec/crawler-nets.conf`
+* **Account needed:** No.
+* **When:** opt-in. The Whitelist page pre-fills the URL field with this address as a suggestion only; nothing is fetched until you save the page. It is then refreshed daily and when you click Refresh. Clear the field to turn remote fetching off, or replace it with your own URL.
+* **Data sent:** none. It is a single anonymous GET request for a static file, with the `wp-thessley/<version>` User-Agent. Nothing about this site, its users or its visitors is sent. The server's standard web-server access log records the requesting IP address and time.
+* **Terms / Privacy:** the file is static and no account or personal data is collected, so there is no separate policy page. Contact for any question or removal request: martin.lundstrom@gmail.com
 
 = DB-IP Country Lite (Geo Blocker and Geo Login modules) =
 
