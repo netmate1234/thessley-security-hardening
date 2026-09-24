@@ -4,7 +4,7 @@ Tags: security, firewall, malware, geo-blocking, brute-force
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.16
+Stable tag: 1.0.17
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -76,18 +76,18 @@ DB-IP's free Country Lite database (CC BY 4.0), refreshed automatically on a sch
 
 == External services ==
 
-This plugin can connect to several third-party services to power its blocking, geolocation, vulnerability-lookup, and alerting features. Each one is only ever contacted while the module that owns it is active; CINS Army and SANS DShield are the only two enabled by default (IP Blocklist's starting feed selection) — everything else requires the site admin to explicitly enable a toggle or enter credentials first.
+This plugin can connect to several third-party services to power its blocking, geolocation, vulnerability-lookup, and alerting features. Activating the plugin makes no external request at all. Every third-party service below is only ever contacted after the site admin explicitly acts on the module that owns it — saving that module's settings, clicking its manual refresh button, or entering credentials for it. The one exception is WordPress.org's own API (api.wordpress.org), queried on File Integrity's and Vulnerability Scan's scheduled scans, never during activation itself.
 
 **IP-reputation feeds (IP Blocklist module)** — plain-text lists of malicious IPs/ranges, fetched periodically and compiled into a local blocklist. Nothing about this site or its visitors is sent to any of these; each is a single anonymous HTTP GET for a public text file.
 
-* CINS Army list (enabled by default): `https://cinsscore.com/list/ci-badguys.txt`. This is a static public feed with no dedicated Terms/Privacy page; project info: https://cinsscore.com/
-* SANS DShield block list (enabled by default): `https://feeds.dshield.org/block.txt`, operated by the SANS Internet Storm Center. About: https://www.dshield.org/about.html — Privacy: https://www.dshield.org/privacy.html
+* CINS Army list (opt-in; suggested when you first save IP Blocklist settings): `https://cinsscore.com/list/ci-badguys.txt`, operated by Sentinel IPS / Nomic Networks. A single anonymous HTTP GET for a public text file; no data about this site or its visitors is sent. Terms: https://sentinelips.com/terms — Privacy: https://sentinelips.com/privacy
+* SANS DShield block list (opt-in; suggested when you first save IP Blocklist settings): `https://feeds.dshield.org/block.txt`, operated by the SANS Internet Storm Center. About: https://www.dshield.org/about.html — Privacy: https://www.dshield.org/privacy.html
 * Spamhaus DROP (opt-in): `https://www.spamhaus.org/drop/drop.txt`. Fair Use Policy: https://www.spamhaus.org/blocklists/drop-fair-use-policy/ — Terms: https://www.spamhaus.org/terms-conditions/ — Privacy: https://www.spamhaus.org/privacy-notice/
 * FireHOL blocklist-ipsets levels 1 & 2, and the ET Tor exit-node list (opt-in): hosted on GitHub at `raw.githubusercontent.com/firehol/blocklist-ipsets`. GitHub Terms: https://docs.github.com/en/site-policy/github-terms/github-terms-of-service — GitHub Privacy Statement: https://docs.github.com/en/site-policy/privacy-policies/github-privacy-statement
 
 **DB-IP Country Lite (Geo Blocker / Geo Login modules)** — a compiled IP-to-country dataset, downloaded on a weekly schedule and looked up locally; no per-visitor data is ever sent to DB-IP. Used whenever Geo Blocker or Geo Login is enabled. Source: https://db-ip.com — Privacy: https://db-ip.com/privacy.php. Dataset licensed CC BY 4.0: https://creativecommons.org/licenses/by/4.0/
 
-**api.wordpress.org (File Integrity module)** — fetches WordPress core's official published checksums to compare against this site's core files. No data about this site is sent. Privacy: https://wordpress.org/about/privacy/
+**api.wordpress.org (File Integrity and Vulnerability Scan modules)** — File Integrity fetches WordPress core's official published checksums to compare against this site's core files; Vulnerability Scan checks each installed plugin's status in the WordPress.org directory (still listed, closed, or long-unmaintained). Sent: File Integrity sends this site's WordPress version and locale (the same two values WordPress core itself sends for its own update checks); Vulnerability Scan sends the slug of each installed plugin being checked. Nothing else about this site. Privacy: https://wordpress.org/about/privacy/
 
 **Jetpack IP list (Query Guard module, opt-in)** — fetches Automattic's published Jetpack IP range list (`https://jetpack.com/ips-v4.txt`) so xmlrpc.php requests genuinely originating from Jetpack's own servers can be exempted from blocking. No data is sent beyond the request for the list itself. Automattic Terms: https://automattic.com/tos/ — Privacy: https://automattic.com/privacy/
 
@@ -98,6 +98,11 @@ This plugin can connect to several third-party services to power its blocking, g
 **unwantedip.eagleeye-intelligence.com (IP Sharing module, opt-in — requires an API key you request)** — a self-hosted IP-reputation tracker run by this plugin's author, shared across sites that opt in. Sends: the blocked IP address, an event category, and a severity label, only when this site actually blocks a request (rate-limited to at most once per IP per hour). The same service can optionally be read back as an additional IP-reputation feed in IP Blocklist (`https://unwantedip.eagleeye-intelligence.com/api/v1/feed/wordpress`), which sends nothing — it's a read-only fetch. Terms: https://unwantedip.eagleeye-intelligence.com/terms.html — Privacy: https://unwantedip.eagleeye-intelligence.com/privacy-policy.html
 
 == Changelog ==
+
+= 1.0.17 =
+* Fixed a remaining activation fatal: if the early-request mu-plugin couldn't be written (host where WP_Filesystem can't initialize, or a read-only mu-plugins directory), activation unconditionally required the missing file. It now falls back to the identical copy bundled in the plugin, produces no PHP warnings, and shows an admin notice explaining that early blocking is inactive until the directory is writable.
+* Event Log's stored request URI now passes through esc_url_raw() (percent-encoded payloads preserved for forensics; raw angle brackets and quotes stripped). Detection itself still reads the raw request.
+* readme: added CINS Army's real Terms/Privacy links (Sentinel IPS / Nomic Networks), and corrected the External services section — nothing is contacted on activation or enabled by default; File Integrity and Vulnerability Scan's use of api.wordpress.org is now disclosed with exactly what they send.
 
 = 1.0.16 =
 * unwantedip.eagleeye-intelligence.com now has a real Terms of Service and Privacy Policy page — linked from the External services section below.

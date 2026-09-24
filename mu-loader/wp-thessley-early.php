@@ -224,7 +224,7 @@ if ( ! function_exists( 'thessley_log_event' ) ) {
 				'action'     => substr( (string) $action, 0, 16 ),
 				'severity'   => $severity,
 				'ip'         => substr( $ip, 0, 45 ),
-				'uri'        => substr( (string) ( $_SERVER['REQUEST_URI'] ?? '' ), 0, 255 ),
+				'uri'        => substr( esc_url_raw( wp_unslash( (string) ( $_SERVER['REQUEST_URI'] ?? '' ) ) ), 0, 255 ),
 				'detail'     => $detail,
 			),
 			array( '%s', '%s', '%s', '%s', '%d', '%s', '%s', '%s' )
@@ -740,7 +740,7 @@ if ( ! function_exists( 'thessley_bot_log_sighting' ) ) {
 				'created_at' => current_time( 'mysql' ),
 				'bot_name'   => substr( $source, 0, 128 ),
 				'ip'         => substr( $ip_string, 0, 45 ),
-				'uri'        => substr( (string) ( $_SERVER['REQUEST_URI'] ?? '' ), 0, 255 ),
+				'uri'        => substr( esc_url_raw( wp_unslash( (string) ( $_SERVER['REQUEST_URI'] ?? '' ) ) ), 0, 255 ),
 			),
 			array( '%s', '%s', '%s', '%s' )
 		);

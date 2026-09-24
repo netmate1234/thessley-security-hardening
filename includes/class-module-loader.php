@@ -108,22 +108,26 @@ class Thessley_Module_Loader {
 	 */
 	public static function fs_copy( $source, $destination, $overwrite = false ) {
 		$fs = self::filesystem();
-		return $fs ? $fs->copy( $source, $destination, $overwrite ) : false;
+		// Writability is checked up front, not left to WP_Filesystem: its
+		// direct driver emits a PHP warning on a failed write, and a
+		// read-only target dir is an expected condition on locked-down
+		// hosts, not an error.
+		return ( $fs && wp_is_writable( dirname( $destination ) ) ) ? $fs->copy( $source, $destination, $overwrite ) : false;
 	}
 
 	public static function fs_delete( $path, $recursive = false ) {
 		$fs = self::filesystem();
-		return $fs ? $fs->delete( $path, $recursive ) : false;
+		return ( $fs && wp_is_writable( dirname( $path ) ) ) ? $fs->delete( $path, $recursive ) : false;
 	}
 
 	public static function fs_move( $source, $destination, $overwrite = false ) {
 		$fs = self::filesystem();
-		return $fs ? $fs->move( $source, $destination, $overwrite ) : false;
+		return ( $fs && wp_is_writable( dirname( $destination ) ) ) ? $fs->move( $source, $destination, $overwrite ) : false;
 	}
 
 	public static function fs_put_contents( $path, $contents, $mode = false ) {
 		$fs = self::filesystem();
-		return $fs ? $fs->put_contents( $path, $contents, $mode ) : false;
+		return ( $fs && wp_is_writable( dirname( $path ) ) ) ? $fs->put_contents( $path, $contents, $mode ) : false;
 	}
 
 	/**
@@ -244,13 +248,13 @@ class Thessley_Module_Loader {
 		// when the request started. Right after a plugin update that's the
 		// *previous* version, so helpers the new module code calls may not be
 		// defined yet — the copy above only fixes the next request. Load the
-		// fresh file now if anything is missing. require_once dedups by path,
-		// so this is a no-op once the current file is already loaded.
-		if ( ! function_exists( 'thessley_log_event' ) && file_exists( THESSLEY_MU_DEST ) ) {
-			require_once THESSLEY_MU_DEST;
+		// fresh file now if anything is missing.
+		if ( ! function_exists( 'thessley_log_event' ) ) {
+			self::load_helpers();
 		}
 
 		add_action( 'admin_menu', array( __CLASS__, 'admin_menu' ), 5 );
+		add_action( 'admin_notices', array( __CLASS__, 'maybe_notice_mu_loader_missing' ) );
 		add_action( 'admin_enqueue_scripts', array( __CLASS__, 'enqueue_assets' ) );
 		Thessley_Menu_Router::register();
 
@@ -270,10 +274,12 @@ class Thessley_Module_Loader {
 		// are defined in *this* process before module activate() hooks run.
 		// Normal bootstrap loads this file as an actual mu-plugin before
 		// plugins_loaded fires, but on a fresh/re-activation the file may
-		// not have existed yet when that happened this same request —
-		// require_once dedups by path, so this is a no-op when it's already
-		// loaded and a real load when it wasn't.
-		require_once THESSLEY_MU_DEST;
+		// not have existed yet when that happened this same request. If
+		// copy_mu_loader() couldn't write it (a host where WP_Filesystem
+		// can't initialize or the directory isn't writable), load_helpers()
+		// falls back to the copy shipped inside this plugin instead of
+		// fataling on a missing file.
+		self::load_helpers();
 
 		foreach ( self::$modules as $module => $class ) {
 			self::load_module( $module );
@@ -910,6 +916,34 @@ class Thessley_Module_Loader {
 		if ( file_exists( $file ) ) {
 			require_once $file;
 		}
+	}
+
+	/**
+	 * Defines the shared early-gate helper functions in this process. Prefers
+	 * the deployed mu-plugin copy; falls back to the identical file shipped
+	 * inside this plugin when that copy doesn't exist (deployment failed, or
+	 * hasn't happened yet this request), so a filesystem the plugin can't
+	 * write to degrades to "early-gate blocking is off" rather than a fatal
+	 * "failed opening required". Every function in that file is
+	 * function_exists()-guarded, so loading the bundled copy is safe even if
+	 * the deployed one appears later.
+	 */
+	private static function load_helpers() {
+		$file = file_exists( THESSLEY_MU_DEST ) ? THESSLEY_MU_DEST : THESSLEY_MU_SOURCE;
+		if ( file_exists( $file ) ) {
+			require_once $file;
+		}
+	}
+
+	/** Tells an admin when the early-gate mu-plugin couldn't be deployed, instead of failing silently. */
+	public static function maybe_notice_mu_loader_missing() {
+		if ( file_exists( THESSLEY_MU_DEST ) || ! current_user_can( 'manage_options' ) ) {
+			return;
+		}
+		printf(
+			'<div class="notice notice-warning"><p>%s</p></div>',
+			esc_html__( 'Thessley Security Hardening could not install its early-request gate into wp-content/mu-plugins (WordPress could not write there). The plugin\'s admin screens still work, but blocking before WordPress loads is inactive until that directory is writable.', 'thessley-security-hardening' )
+		);
 	}
 
 	private static function copy_mu_loader() {
