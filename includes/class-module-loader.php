@@ -242,6 +242,7 @@ class Thessley_Module_Loader {
 
 	public static function init() {
 		self::migrate_legacy_identifiers();
+		self::remove_obsolete_data_files();
 		self::ensure_mu_loader_current();
 
 		// The mu-plugin WordPress loaded this request is whatever was on disk
@@ -916,6 +917,23 @@ class Thessley_Module_Loader {
 		if ( file_exists( $file ) ) {
 			require_once $file;
 		}
+	}
+
+	/**
+	 * The local blocklist used to be mirrored into a generated PHP range
+	 * file under mu-plugins; it's now read straight from its option (see
+	 * thessley_local_blocklist_has()), so any copy left behind by an earlier
+	 * version is dead weight. Runs once per site.
+	 */
+	private static function remove_obsolete_data_files() {
+		if ( get_option( 'thessley_local_file_removed' ) ) {
+			return;
+		}
+		$old = THESSLEY_CHECKS_DIR . '/data/local-blocklist-ranges.php';
+		if ( file_exists( $old ) ) {
+			self::fs_delete( $old );
+		}
+		update_option( 'thessley_local_file_removed', 1 );
 	}
 
 	/**

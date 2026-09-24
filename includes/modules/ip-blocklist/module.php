@@ -246,7 +246,7 @@ class Thessley_Module_IP_Blocklist {
 		);
 
 		// phpcs:disable WordPress.Security.NonceVerification.Recommended, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- read-only local-blocklist search/pagination, not a state-changing action; $lb_q is only used for a stripos() comparison and is esc_attr()'d wherever it's echoed back into the search box below, and $_GET['page']/['tab'] are only ever echoed into hidden fields via esc_attr(wp_unslash(...)).
-		$lb_q = isset( $_GET['lb_q'] ) ? trim( wp_unslash( $_GET['lb_q'] ) ) : '';
+		$lb_q = isset( $_GET['lb_q'] ) ? sanitize_text_field( wp_unslash( $_GET['lb_q'] ) ) : '';
 
 		$local_filtered = $local;
 		if ( '' !== $lb_q ) {
@@ -270,8 +270,8 @@ class Thessley_Module_IP_Blocklist {
 		echo '<p class="thessley-help" style="margin-top:0">IPs added here — manually, or auto-escalated by Query Guard and Login Guard — are checked alongside the feeds above, and expire automatically.</p>';
 		?>
 		<form method="get" style="margin:0 0 10px;display:flex;gap:6px;align-items:center">
-			<input type="hidden" name="page" value="<?php echo esc_attr( wp_unslash( $_GET['page'] ?? '' ) ); ?>">
-			<input type="hidden" name="tab" value="<?php echo esc_attr( wp_unslash( $_GET['tab'] ?? '' ) ); ?>">
+			<input type="hidden" name="page" value="<?php echo esc_attr( sanitize_key( wp_unslash( $_GET['page'] ?? '' ) ) ); ?>">
+			<input type="hidden" name="tab" value="<?php echo esc_attr( sanitize_key( wp_unslash( $_GET['tab'] ?? '' ) ) ); ?>">
 			<input type="text" name="lb_q" value="<?php echo esc_attr( $lb_q ); ?>" placeholder="Search IP or reason&hellip;" style="width:220px">
 			<?php submit_button( 'Search', 'secondary', 'submit', false ); ?>
 			<?php if ( '' !== $lb_q ) : ?>

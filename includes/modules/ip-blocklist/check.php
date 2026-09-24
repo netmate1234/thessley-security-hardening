@@ -9,17 +9,12 @@ if ( ! defined( 'ABSPATH' ) ) {
 thessley_register_check(
 	function () {
 		static $ranges = null;
-		static $local  = null;
 
 		if ( null === $ranges ) {
 			$data_file = __DIR__ . '/data/ip-blocklist-ranges.php';
 			$ranges    = file_exists( $data_file ) ? require $data_file : array();
 		}
-		if ( null === $local ) {
-			$local = file_exists( thessley_local_blocklist_file() ) ? require thessley_local_blocklist_file() : array();
-		}
-
-		if ( empty( $ranges ) && empty( $local ) ) {
+		if ( empty( $ranges ) && ! get_option( 'thessley_local_blocklist', array() ) ) {
 			return null;
 		}
 
@@ -39,7 +34,7 @@ thessley_register_check(
 
 		$source = null;
 		$label  = '';
-		if ( thessley_ip_in_ranges( $needle, $local ) ) {
+		if ( thessley_local_blocklist_has( $ip ) ) {
 			$source = 'local';
 			$label  = 'local blocklist';
 		} elseif ( thessley_ip_in_ranges( $needle, $ranges ) ) {

@@ -66,10 +66,12 @@ class Thessley_Module_User_Enum {
 	 * query-var form (?sitemap=users) sites without rewrite rules use.
 	 */
 	public static function block_user_sitemap_request() {
-		// phpcs:disable WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- must match the raw request path to detect the users sitemap URL; sanitizing it here would risk altering the very string this check matches against.
+		// Boolean match only, and the pattern is plain path characters, so
+		// the sanitized form (sanitize_text_field() strips only tags and
+		// percent-encoded octets) matches exactly what the raw one would.
+		$request_uri      = sanitize_text_field( wp_unslash( (string) ( $_SERVER['REQUEST_URI'] ?? '' ) ) );
 		$is_users_sitemap = 'users' === get_query_var( 'sitemap' )
-			|| (bool) preg_match( '#/wp-sitemap-users-\d+\.xml(?:$|[/?])#i', (string) ( $_SERVER['REQUEST_URI'] ?? '' ) );
-		// phpcs:enable WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
+			|| (bool) preg_match( '#/wp-sitemap-users-\d+\.xml(?:$|[/?])#i', $request_uri );
 
 		if ( ! $is_users_sitemap ) {
 			return;

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Thessley Security Hardening
  * Description: General security hardening plugin. Modular — each feature lives under includes/modules.
- * Version: 1.0.17
+ * Version: 1.0.18
  * Author: Martin Lundstrom
  * Text Domain: thessley-security-hardening
  * License: GPLv2 or later
@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'THESSLEY_VERSION', '1.0.17' );
+define( 'THESSLEY_VERSION', '1.0.18' );
 define( 'THESSLEY_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'THESSLEY_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'THESSLEY_MU_SOURCE', THESSLEY_PLUGIN_DIR . 'mu-loader/wp-thessley-early.php' );

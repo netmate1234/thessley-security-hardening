@@ -100,8 +100,10 @@ class Thessley_Module_Query_Guard {
 		}
 
 		$mode   = get_option( 'thessley_query_guard_mode', 'log' );
-		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- diagnostic text only (truncated to 200 chars, stored in the event log), not used for any security decision or re-output as HTML.
-		$detail = 'anonymous /batch/v1 request (path: ' . substr( (string) wp_unslash( $_SERVER['REQUEST_URI'] ?? '' ), 0, 200 ) . ')';
+		// The route match above already decided this request; the URI is only
+		// diagnostic text for the event log, so it's stored sanitized (same
+		// esc_url_raw() the early gate applies to the logged uri column).
+		$detail = 'anonymous /batch/v1 request (path: ' . substr( esc_url_raw( wp_unslash( (string) ( $_SERVER['REQUEST_URI'] ?? '' ) ) ), 0, 200 ) . ')';
 
 		if ( 'block' !== $mode ) {
 			thessley_log_event( 'query-guard', 'other_wp2shell_batch_route_cve202663030', 'logged', $detail );

@@ -4,7 +4,7 @@ Tags: security, firewall, malware, geo-blocking, brute-force
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.17
+Stable tag: 1.0.18
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -83,7 +83,7 @@ This plugin can connect to several third-party services to power its blocking, g
 * CINS Army list (opt-in; suggested when you first save IP Blocklist settings): `https://cinsscore.com/list/ci-badguys.txt`, operated by Sentinel IPS / Nomic Networks. A single anonymous HTTP GET for a public text file; no data about this site or its visitors is sent. Terms: https://sentinelips.com/terms — Privacy: https://sentinelips.com/privacy
 * SANS DShield block list (opt-in; suggested when you first save IP Blocklist settings): `https://feeds.dshield.org/block.txt`, operated by the SANS Internet Storm Center. About: https://www.dshield.org/about.html — Privacy: https://www.dshield.org/privacy.html
 * Spamhaus DROP (opt-in): `https://www.spamhaus.org/drop/drop.txt`. Fair Use Policy: https://www.spamhaus.org/blocklists/drop-fair-use-policy/ — Terms: https://www.spamhaus.org/terms-conditions/ — Privacy: https://www.spamhaus.org/privacy-notice/
-* FireHOL blocklist-ipsets levels 1 & 2, and the ET Tor exit-node list (opt-in): hosted on GitHub at `raw.githubusercontent.com/firehol/blocklist-ipsets`. GitHub Terms: https://docs.github.com/en/site-policy/github-terms/github-terms-of-service — GitHub Privacy Statement: https://docs.github.com/en/site-policy/privacy-policies/github-privacy-statement
+* FireHOL blocklist-ipsets levels 1 & 2, and the ET Tor exit-node list (opt-in): hosted on GitHub at `raw.githubusercontent.com/firehol/blocklist-ipsets`. These are the FireHOL project's own published data lists, and the only place they're distributed from besides the project's site: plain-text lists of IP addresses and CIDR ranges — not scripts, stylesheets, images or any other code. They're downloaded server-side through WordPress' HTTP API, parsed as text into a local range table, and never executed, rendered, or loaded by a visitor's browser. No account is needed. GitHub Terms: https://docs.github.com/en/site-policy/github-terms/github-terms-of-service — GitHub Privacy Statement: https://docs.github.com/en/site-policy/privacy-policies/github-privacy-statement
 
 **DB-IP Country Lite (Geo Blocker / Geo Login modules)** — a compiled IP-to-country dataset, downloaded on a weekly schedule and looked up locally; no per-visitor data is ever sent to DB-IP. Used whenever Geo Blocker or Geo Login is enabled. Source: https://db-ip.com — Privacy: https://db-ip.com/privacy.php. Dataset licensed CC BY 4.0: https://creativecommons.org/licenses/by/4.0/
 
@@ -98,6 +98,11 @@ This plugin can connect to several third-party services to power its blocking, g
 **unwantedip.eagleeye-intelligence.com (IP Sharing module, opt-in — requires an API key you request)** — a self-hosted IP-reputation tracker run by this plugin's author, shared across sites that opt in. Sends: the blocked IP address, an event category, and a severity label, only when this site actually blocks a request (rate-limited to at most once per IP per hour). The same service can optionally be read back as an additional IP-reputation feed in IP Blocklist (`https://unwantedip.eagleeye-intelligence.com/api/v1/feed/wordpress`), which sends nothing — it's a read-only fetch. Terms: https://unwantedip.eagleeye-intelligence.com/terms.html — Privacy: https://unwantedip.eagleeye-intelligence.com/privacy-policy.html
 
 == Changelog ==
+
+= 1.0.18 =
+* The local blocklist is no longer mirrored into a generated PHP range file under wp-content/mu-plugins. That file only ever held exact single IPs already keyed by address in the thessley_local_blocklist option, so the early gate now checks the option directly (autoloaded, no extra query) and the plugin no longer writes any generated executable PHP from the request path at all. A leftover copy from an earlier version is removed once on upgrade.
+* Request URIs and the Local Blocklist search box/hidden fields now pass through sanitizers (esc_url_raw(), sanitize_text_field(), sanitize_key()) wherever the value is only compared, logged, or displayed; the early-gate signature scans still read the raw request, since sanitizing it would alter the string being detected.
+* readme: stated explicitly that the GitHub-hosted FireHOL/ET Tor feeds are plain-text data lists fetched server-side, not code or assets.
 
 = 1.0.17 =
 * Fixed a remaining activation fatal: if the early-request mu-plugin couldn't be written (host where WP_Filesystem can't initialize, or a read-only mu-plugins directory), activation unconditionally required the missing file. It now falls back to the identical copy bundled in the plugin, produces no PHP warnings, and shows an admin notice explaining that early blocking is inactive until the directory is writable.
