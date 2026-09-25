@@ -72,10 +72,12 @@ The early-request checks (IP Blocklist, Geo Blocker, Geo Login, Rate Limiter, Qu
 
 = What files does this plugin write, and where? =
 
-Two places, both created by the plugin itself and both removed when it is deleted (the loader file also when you deactivate it):
+Two places by default, both created by the plugin itself and both removed when it is deleted (the loader file also when you deactivate it), plus one optional block you can switch on in Hardening:
 
 1. `wp-content/mu-plugins/wp-thessley-early.php` — a single small must-use plugin. This is what lets the blocking modules run before WordPress and other plugins load, the same reason caching plugins install a drop-in. It contains no site-specific data and is a copy of `mu-loader/wp-thessley-early.php` inside this plugin. It loads each enabled module's `check.php` directly from this plugin's folder, so nothing else is copied into wp-content. If `mu-plugins` isn't writable, the plugin still works, but early blocking is off and an admin notice says so.
 2. `wp-content/uploads/thessley-security-hardening/` — compiled datasets (the merged IP-blocklist ranges, the geo-country index, the trusted-networks list), located with `wp_upload_dir()` and protected from direct web access with `.htaccess` and an `index.php`. They are plain data files (binary, JSON and text), never PHP, and nothing in this folder is executed.
+
+3. Optional, off by default: the "Web-root protection" setting in Hardening adds one marked block to the site's `.htaccess` (using WordPress' own `insert_with_markers()`) that makes Apache refuse files such as `wp-config.php.bak`, database dumps, `error_log`, `readme.html` and stray archives, which the web server would otherwise hand out without PHP ever running. Unchecking the setting, or deactivating the plugin, removes exactly that block.
 
 Everything else (settings, the local blocklist, the event log) is stored in the database. The plugin never writes to WordPress core folders, its own plugin folder, or other plugins' or themes' folders.
 
@@ -112,7 +114,7 @@ Terms: https://unwantedip.eagleeye-intelligence.com/terms.html — Privacy: http
 
 = wp-opsec.eagleeye-intelligence.com (Whitelist module: trusted-networks list) =
 
-A service run by this plugin's author that publishes `crawler-nets.conf`, a plain-text list of the IP ranges used by legitimate search-engine, AI and monitoring crawlers (Google, Bing, DuckDuckGo, OpenAI, Cloudflare and others), updated automatically from those operators' own published ranges. The Whitelist module uses it so genuine crawlers are not blocked by the other modules.
+A service run by this plugin's author that publishes `crawler-nets.conf`, a plain-text list of the IP ranges used by legitimate search-engine, AI and monitoring crawlers (Google, Bing, DuckDuckGo, OpenAI and others), updated automatically from those operators' own published ranges. The Whitelist module uses it so genuine crawlers are not blocked by the other modules.
 
 * **Server contacted:** `wp-opsec.eagleeye-intelligence.com`, one file: `https://wp-opsec.eagleeye-intelligence.com/wp-content/uploads/wp-opsec/crawler-nets.conf`
 * **Account needed:** No.

@@ -152,6 +152,7 @@ if ( ! function_exists( 'thessley_severity_map' ) ) {
 			'login-guard:lockout'                   => 12,
 			'login-guard:locked_attempt'            => 10,
 			'query-guard:xmlrpc_access'             => 10,
+			'rate-limiter:probe_flood'              => 10,
 
 			// --- Reconnaissance ---------------------------------------
 			'ip-blocklist:listed_ip'                => 8,
@@ -159,6 +160,9 @@ if ( ! function_exists( 'thessley_severity_map' ) ) {
 			'user-enum:author_scan'                  => 7,
 			'query-guard:path_plugin_theme_readme_probe' => 7,
 			'query-guard:path_wlwmanifest_probe'         => 7,
+			'query-guard:path_login_pathinfo_recon'      => 7,
+			'query-guard:path_debug_endpoint_probe'      => 9,
+			'query-guard:ua_known_scanner'               => 8,
 			'login-guard:login_failed'              => 5,
 
 			// --- Informational ----------------------------------------

@@ -19,6 +19,14 @@ class Thessley_Module_Login_Guard {
 	const DEFAULT_WINDOW_MIN  = 15;
 	const DEFAULT_LOCKOUT_MIN = 60;
 
+	// A person cannot submit three wrong logins in ten seconds; a bot can, and
+	// low-and-slow botnets deliberately stay under the per-window threshold
+	// above by giving every IP only a handful of tries (one campaign here
+	// tried five usernames in one second from each of ~65 shared-hosting IPs
+	// and never reached 8). This burst rule is what catches them.
+	const DEFAULT_BURST_FAILS = 3;
+	const BURST_SECONDS       = 10;
+
 	public static function activate() {
 		if ( ! wp_next_scheduled( self::CRON_HOOK ) ) {
 			wp_schedule_event( time(), 'hourly', self::CRON_HOOK );
@@ -159,7 +167,22 @@ class Thessley_Module_Login_Guard {
 
 		$count = count( $entry['fails'] );
 
-		if ( $count >= $max ) {
+		$burst_max = (int) get_option( 'thessley_login_guard_burst_fails', self::DEFAULT_BURST_FAILS );
+		$burst     = 0;
+		if ( $burst_max > 0 ) {
+			$cutoff = $now - self::BURST_SECONDS;
+			$burst  = count(
+				array_filter(
+					$entry['fails'],
+					function ( $ts ) use ( $cutoff ) {
+						return $ts > $cutoff;
+					}
+				)
+			);
+		}
+		$is_burst = $burst_max > 0 && $burst >= $burst_max;
+
+		if ( $count >= $max || $is_burst ) {
 			$lockout = max( 1, (int) get_option( 'thessley_login_guard_lockout_min', self::DEFAULT_LOCKOUT_MIN ) );
 			$entry['locked_until'] = $now + ( $lockout * MINUTE_IN_SECONDS );
 			$entry['fails']        = array();
@@ -170,13 +193,15 @@ class Thessley_Module_Login_Guard {
 				'login-guard',
 				'lockout',
 				'blocked',
-				sprintf( '%d failed logins in %d min; locked %d min; last user "%s"', $count, (int) get_option( 'thessley_login_guard_window_min', self::DEFAULT_WINDOW_MIN ), $lockout, $username )
+				$is_burst
+					? sprintf( '%d failed logins in %d s (burst); locked %d min; last user "%s"', $burst, self::BURST_SECONDS, $lockout, $username )
+					: sprintf( '%d failed logins in %d min; locked %d min; last user "%s"', $count, (int) get_option( 'thessley_login_guard_window_min', self::DEFAULT_WINDOW_MIN ), $lockout, $username )
 			);
 
 			// Escalate to the shared local blocklist so the early gate stops
 			// this IP before WP even bootstraps on subsequent requests.
 			if ( get_option( 'thessley_login_guard_escalate', true ) ) {
-				thessley_local_blocklist_add( $ip, 'login-guard: brute force', $lockout * MINUTE_IN_SECONDS );
+				thessley_local_blocklist_add( $ip, $is_burst ? 'login-guard: login burst' : 'login-guard: brute force', $lockout * MINUTE_IN_SECONDS );
 			}
 			return;
 		}
@@ -282,6 +307,8 @@ class Thessley_Module_Login_Guard {
 		update_option( 'thessley_login_guard_window_min', max( 1, (int) ( $_POST['window_min'] ?? self::DEFAULT_WINDOW_MIN ) ) );
 		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- same as max_fails above.
 		update_option( 'thessley_login_guard_lockout_min', max( 1, (int) ( $_POST['lockout_min'] ?? self::DEFAULT_LOCKOUT_MIN ) ) );
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- same as max_fails above; 0 turns the burst rule off.
+		update_option( 'thessley_login_guard_burst_fails', max( 0, (int) ( $_POST['burst_fails'] ?? self::DEFAULT_BURST_FAILS ) ) );
 
 		if ( isset( $_POST['clear_lockouts'] ) ) {
 			self::clear_all_lockouts();
@@ -298,6 +325,7 @@ class Thessley_Module_Login_Guard {
 		$max_fails   = (int) get_option( 'thessley_login_guard_max_fails', self::DEFAULT_MAX_FAILS );
 		$window_min  = (int) get_option( 'thessley_login_guard_window_min', self::DEFAULT_WINDOW_MIN );
 		$lockout_min = (int) get_option( 'thessley_login_guard_lockout_min', self::DEFAULT_LOCKOUT_MIN );
+		$burst_fails = (int) get_option( 'thessley_login_guard_burst_fails', self::DEFAULT_BURST_FAILS );
 
 		$locked = self::locked_ips();
 		arsort( $locked );
@@ -359,6 +387,17 @@ class Thessley_Module_Login_Guard {
 						<?php
 					},
 					'A successful login clears the counter for that IP, so a few typos before getting in do not leave someone one mistake from a lockout.'
+				);
+
+				Thessley_UI::row(
+					'Burst rule',
+					function () use ( $burst_fails ) {
+						?>
+						<input type="number" name="burst_fails" value="<?php echo esc_attr( $burst_fails ); ?>" min="0" style="width:5em">
+						failures within <?php echo esc_html( self::BURST_SECONDS ); ?> seconds
+						<?php
+					},
+					'Locks an IP immediately when it fires failed logins faster than a person can type. Catches botnets that give each IP only a few tries to stay under the threshold above. Set to 0 to turn it off.'
 				);
 
 				Thessley_UI::row(

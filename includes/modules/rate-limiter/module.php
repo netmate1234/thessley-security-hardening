@@ -23,7 +23,101 @@ class Thessley_Module_Rate_Limiter {
 	public static function register() {
 		self::deploy_check_file();
 		add_action( 'admin_post_thessley_rl_save_settings', array( __CLASS__, 'handle_save_settings' ) );
+		// Runs once WordPress has decided the request is a 404, which the early
+		// gate cannot know yet. Priority 0 so it counts before any redirect
+		// plugin gets a chance to answer the request.
+		add_action( 'template_redirect', array( __CLASS__, 'watch_404_probing' ), 0 );
 		return __CLASS__;
+	}
+
+	const DEFAULT_404_DISTINCT = 10;
+	const PROBE_WINDOW         = 60;
+
+	/**
+	 * Catches blind sweeps by behaviour rather than by signature: an IP that
+	 * asks for many different paths that do not exist within a minute is
+	 * probing, whatever the paths are (new scanner toolkits are guessing
+	 * fresh file names every week, and most of a sweep's first requests hit
+	 * names no signature has caught up with yet).
+	 *
+	 * What is deliberately not counted, because ordinary visitors and
+	 * crawlers cause these: missing images/CSS/JS/fonts (a page with a few
+	 * broken assets), requests that carry a Referer from this same site
+	 * (someone following a broken link), and logged-in users.
+	 */
+	public static function watch_404_probing() {
+		if ( ! is_404() || ! get_option( 'thessley_ratelimit_enabled', true ) ) {
+			return;
+		}
+
+		$limit = (int) get_option( 'thessley_ratelimit_404_distinct', self::DEFAULT_404_DISTINCT );
+		if ( $limit < 1 || is_user_logged_in() ) {
+			return;
+		}
+
+		$ip = thessley_client_ip();
+		if ( '' === $ip || thessley_ip_is_exempt( $ip ) ) {
+			return;
+		}
+
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- only parsed for its path and compared/hashed, never output or stored raw.
+		$path = (string) wp_parse_url( (string) ( $_SERVER['REQUEST_URI'] ?? '' ), PHP_URL_PATH );
+		if ( preg_match( '/\.(?:jpe?g|png|gif|webp|avif|svg|ico|css|js|map|woff2?|ttf|eot|otf|mp[34]|webm)$/i', $path ) ) {
+			return;
+		}
+
+		$referer_host = isset( $_SERVER['HTTP_REFERER'] ) ? wp_parse_url( esc_url_raw( wp_unslash( $_SERVER['HTTP_REFERER'] ) ), PHP_URL_HOST ) : '';
+		if ( $referer_host && wp_parse_url( home_url(), PHP_URL_HOST ) === $referer_host ) {
+			return;
+		}
+
+		$key   = 'thessley_p404_' . md5( $ip );
+		$state = get_transient( $key );
+		$state = is_array( $state ) ? $state : array( 'paths' => array(), 'flagged' => false );
+		$now   = time();
+
+		foreach ( $state['paths'] as $hash => $ts ) {
+			if ( $ts <= $now - self::PROBE_WINDOW ) {
+				unset( $state['paths'][ $hash ] );
+			}
+		}
+		$state['paths'][ md5( $path ) ] = $now;
+
+		$distinct = count( $state['paths'] );
+		$tripped  = $distinct >= $limit;
+
+		// Log and escalate once per burst, not once per request: a sweep can be
+		// hundreds of requests and the event log should record it once.
+		$first = $tripped && empty( $state['flagged'] );
+		if ( $first ) {
+			$state['flagged'] = true;
+		}
+		set_transient( $key, $state, 2 * self::PROBE_WINDOW );
+
+		if ( ! $tripped ) {
+			return;
+		}
+
+		$block = 'block' === get_option( 'thessley_ratelimit_mode', 'log' );
+
+		if ( $first ) {
+			thessley_log_event(
+				'rate-limiter',
+				'probe_flood',
+				$block ? 'blocked' : 'logged',
+				sprintf( '%d distinct missing paths within %d s (latest: %s)', $distinct, self::PROBE_WINDOW, substr( $path, 0, 120 ) ),
+				10
+			);
+
+			if ( $block && get_option( 'thessley_ratelimit_escalate', true ) ) {
+				$minutes = max( 1, (int) get_option( 'thessley_ratelimit_escalate_minutes', 30 ) );
+				thessley_local_blocklist_add( $ip, 'rate-limiter: 404 probing', $minutes * MINUTE_IN_SECONDS );
+			}
+		}
+
+		if ( $block ) {
+			wp_die( esc_html__( 'Access denied.', 'thessley-security-hardening' ), '', array( 'response' => 403 ) );
+		}
 	}
 
 	private static function deploy_check_file() {
@@ -44,6 +138,8 @@ class Thessley_Module_Rate_Limiter {
 		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- (int) cast is itself the sanitizer; wp_unslash() would be a no-op on a value about to be cast to int.
 		update_option( 'thessley_ratelimit_per_minute', max( 10, (int) ( $_POST['per_minute'] ?? 300 ) ) );
 		update_option( 'thessley_ratelimit_escalate', isset( $_POST['escalate'] ) );
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- same as per_minute above; 0 turns the 404 rule off.
+		update_option( 'thessley_ratelimit_404_distinct', max( 0, (int) ( $_POST['probe_404'] ?? self::DEFAULT_404_DISTINCT ) ) );
 		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- same as per_minute above.
 		update_option( 'thessley_ratelimit_escalate_after', max( 1, (int) ( $_POST['escalate_after'] ?? 3 ) ) );
 		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- same as per_minute above.
@@ -58,6 +154,7 @@ class Thessley_Module_Rate_Limiter {
 		$mode     = get_option( 'thessley_ratelimit_mode', 'log' );
 		$per_min  = (int) get_option( 'thessley_ratelimit_per_minute', 300 );
 		$escalate = get_option( 'thessley_ratelimit_escalate', true );
+		$probe404 = (int) get_option( 'thessley_ratelimit_404_distinct', self::DEFAULT_404_DISTINCT );
 		$after    = (int) get_option( 'thessley_ratelimit_escalate_after', 3 );
 		$minutes  = (int) get_option( 'thessley_ratelimit_escalate_minutes', 30 );
 
@@ -104,6 +201,16 @@ class Thessley_Module_Rate_Limiter {
 						<?php
 					},
 					'Only counts requests that reach PHP — a page\'s CSS/JS/image sub-resources are served directly by the web server and never counted. 300/min (5/sec) comfortably covers normal browsing, editing, and REST/heartbeat polling while catching genuine floods.'
+				);
+
+				Thessley_UI::row(
+					'404 probing',
+					function () use ( $probe404 ) {
+						?>
+						<input type="number" name="probe_404" value="<?php echo esc_attr( $probe404 ); ?>" min="0" style="width:5em"> different missing pages within <?php echo esc_html( self::PROBE_WINDOW ); ?> seconds, per IP
+						<?php
+					},
+					'Catches blind sweeps by behaviour, whatever paths they guess. Missing images/CSS/JS, visits following a broken link on this site, and logged-in users are not counted. Uses the mode and escalation settings below. Set to 0 to turn it off.'
 				);
 
 				Thessley_UI::row(

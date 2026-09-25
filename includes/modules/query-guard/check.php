@@ -116,6 +116,10 @@ if ( ! function_exists( 'thessley_query_guard_patterns' ) ) {
 			// decoded-form matching (see the scan call below) already
 			// catches the %2F-encoded variants seen in the same logs.
 			array( 'id' => 'other_wp2shell_batch_route_cve202663030', 'category' => 'other', 'regex' => '#rest_route=/?batch/v1(?:[/?&]|$)#i' ),
+			// The same tool tags its requests with a random _u=<8 hex> cache-buster
+			// (seen on a POST to /wp-admin/ two days before its batch-route
+			// attempts). Nothing legitimate sends a bare 8-hex "_u" parameter.
+			array( 'id' => 'other_wp2shell_cachebuster', 'category' => 'other', 'regex' => '/(?:^|&)_u=[0-9a-f]{8}(?:&|$)/i' ),
 		);
 	}
 
@@ -156,8 +160,11 @@ if ( ! function_exists( 'thessley_query_guard_path_patterns' ) ) {
 			// (/.env.development, /.env.local, /.env.production,
 			// /.env.staging all sailed through untouched) rather than
 			// assuming the narrower pattern was enough.
-			array( 'id' => 'path_dotenv_exposed', 'regex' => '#(?:^|/)\.env(?:\.[a-z0-9_-]+)?(?:$|[/?])#i' ),
-			array( 'id' => 'path_git_config_exposed', 'regex' => '#/\.git/config(?:$|[/?])#i' ),
+			array( 'id' => 'path_dotenv_exposed', 'regex' => '#(?:^|/)\.env(?:\.[a-z0-9_-]+)*(?:$|[/?])#i' ),
+			// Any request into /.git (HEAD, index, logs/, refs/, objects/...), not
+			// just /.git/config: sweeps open with /.git/HEAD, which the narrower
+			// pattern let through with no event logged at all.
+			array( 'id' => 'path_git_config_exposed', 'regex' => '#/\.git(?:$|[/?])#i' ),
 			array( 'id' => 'path_wpconfig_backup', 'regex' => '#/wp-config\.php(?:\.bak|~|\.save|\.old|\.orig|\.swp)(?:$|[/?])#i' ),
 			// The query-string traversal_dotdot signature above never
 			// covers this: "../" in the *path* itself, not a query param —
@@ -190,7 +197,55 @@ if ( ! function_exists( 'thessley_query_guard_path_patterns' ) ) {
 			// blind-guess prefixes can't dodge it. Without this, only a
 			// country/IP filter ever saw it; a site with neither logged nothing.
 			array( 'id' => 'path_wlwmanifest_probe', 'regex' => '#/wlwmanifest\.xml(?:$|[/?])#i' ),
+			// Credential hunting. Sweeps open with these, so recognising them
+			// blocks the sweep at its first request instead of waiting for it to
+			// reach /.env: cloud/CLI credential stores, SSH keys, shell history,
+			// and the config folders of AI coding tools (.claude, .codex,
+			// .cursor, ...) that hold API keys. Dot-folders never belong in a
+			// web root, so there is nothing to weigh.
+			array( 'id' => 'path_credential_file_probe', 'regex' => '#/(?:\.(?:aws|azure|docker|dockercfg|kube|ssh|gnupg|npmrc|pypirc|netrc|s3cfg|boto|git-credentials|gitconfig|htpasswd|bash_history|zsh_history|mysql_history|psql_history|firebaserc|dev\.vars|claude|claude\.json|codex|cursor|continue|aider|windsurf|gemini|copilot|vscode|idea|svn|hg|bzr)|\.config/(?:gcloud|claude|gh|doctl)|id_(?:rsa|ed25519|ecdsa|dsa)|(?:privkey|server|private)\.(?:pem|key))(?:$|[/?.])#i' ),
+			// Root-level project, secret and infrastructure files. Anchored to the
+			// site root: a plugin may legitimately ship a config.json or
+			// package.json inside its own folder, but none of these belong at
+			// the top of a WordPress install.
+			array( 'id' => 'path_project_file_probe', 'regex' => '#^/(?:(?:config|configuration|settings|secrets?|credentials?|appsettings|parameters|env)(?:\.[a-z0-9_-]+)?\.(?:json|ya?ml|toml|ini|xml|properties)|docker-compose(?:\.[a-z0-9_-]+)?\.ya?ml|dockerfile|terraform\.tfstate(?:\.backup)?|[a-z0-9_.-]+\.tfvars(?:\.json)?|serverless\.ya?ml|firebase\.json|vercel\.json|netlify\.toml|next\.config\.[cm]?js|composer\.(?:json|lock)|package(?:-lock)?\.json|yarn\.lock|(?:google-)?credentials\.json|mcp-servers\.json|bootstrap/cache/config\.php|app/etc/env\.php|rest/credentials|api/v1/credentials|(?:backups?|dumps?)/?)(?:$|\?)#i' ),
+			// Framework debug/admin surfaces other stacks expose (Spring Boot
+			// actuator, Go pprof, Symfony profiler, CouchDB, Laravel
+			// Telescope/Horizon/Ignition, Vite dev-server /@fs file reads,
+			// Metabase setup properties) plus generic cgi-bin. None exist on a
+			// WordPress install, so any request is a blind stack-fingerprinting
+			// sweep.
+			array( 'id' => 'path_debug_endpoint_probe', 'regex' => '#^/(?:actuator(?:/|$)|debug/(?:pprof|vars)|_profiler(?:/|$)|_all_dbs|_ignition|telescope(?:/|$)|horizon(?:/|$)|@(?:fs|vite)/|cgi-bin/|api/session/properties|jolokia|manager/html|solr/admin|server-(?:status|info)(?:$|\?))#i' ),
+			// Known webshell / backdoor filenames scanners request in the hope
+			// a compromised site already has one dropped.
+			array( 'id' => 'path_webshell_probe', 'regex' => '#/(?:wp_filemanager|this_is_a_new_hello_world|c99|r57|wso|b374k|indoxploit|webshell|alfa|shell|cmd)\.php(?:$|[/?])#i' ),
+			// Path-info recon: /wp-login.php/wp-json/wp/v2/users/, /wp-login.php/?author=1
+			// and friends. wp-login.php answers with its normal 200 login page for
+			// any trailing path, so scanners use it to run user-enumeration and
+			// fingerprinting probes past filters that only watch the real routes.
+			// A trailing slash alone is fine; a path after it never is.
+			array( 'id' => 'path_login_pathinfo_recon', 'regex' => '#/wp-login\.php/[^?]+#i' ),
+			// A NUL byte in the decoded path (".env%00.html" style) is a
+			// filter-evasion trick; the other patterns above would miss the
+			// suffix-mangled path.
+			array( 'id' => 'path_null_byte', 'regex' => '/\x00/' ),
 		);
+	}
+
+	/**
+	 * Tools that announce themselves in the User-Agent (or are recognised
+	 * scanner fingerprints). Deliberately an explicit list of scanner
+	 * names — never generic HTTP clients like curl or python-requests,
+	 * which real monitoring and webhooks use.
+	 */
+	function thessley_query_guard_scan_ua( $ua ) {
+		if ( '' === $ua ) {
+			return null;
+		}
+		if ( preg_match( '#(crusader-worker|metabase-cve-|SmarterMail-Scanner|libredtail-http|Infrawatch|InternetMeasurement|CMS-Checker|AgentTrustBot|zgrab|masscan|nuclei|sqlmap|nikto|Nmap Scripting Engine|CensysInspect|l9explore|l9tcpid|Palo Alto Networks|NetSystemsResearch|Expanse, a Palo)#i', $ua, $m ) ) {
+			return array( 'id' => 'ua_known_scanner', 'matches' => $m );
+		}
+		return null;
 	}
 
 	function thessley_query_guard_scan_path( $path ) {
@@ -306,13 +361,20 @@ thessley_register_check(
 		// query string at all used to skip this whole check, missing
 		// exactly the attacks that live in the path instead (see
 		// thessley_query_guard_path_patterns()'s own docblock).
-		$hit      = thessley_query_guard_scan_path( $path );
-		$via_path = null !== $hit;
+		$hit = thessley_query_guard_scan_path( $path );
+		$via = null !== $hit ? 'path' : '';
 
 		if ( ! $hit && '' !== $qs ) {
 			$categories = get_option( 'thessley_query_guard_categories', array( 'sqli', 'xss', 'traversal', 'cmdi', 'other' ) );
 			$decoded    = rawurldecode( $qs );
 			$hit        = thessley_query_guard_scan( $qs, $categories ) ?: thessley_query_guard_scan( $decoded, $categories );
+			$via        = $hit ? 'qs' : '';
+		}
+
+		if ( ! $hit ) {
+			$ua  = isset( $_SERVER['HTTP_USER_AGENT'] ) ? sanitize_text_field( wp_unslash( $_SERVER['HTTP_USER_AGENT'] ) ) : '';
+			$hit = thessley_query_guard_scan_ua( $ua );
+			$via = $hit ? 'ua' : '';
 		}
 
 		if ( ! $hit ) {
@@ -320,9 +382,13 @@ thessley_register_check(
 		}
 
 		$mode    = get_option( 'thessley_query_guard_mode', 'log' );
-		$snippet = $via_path
-			? 'path: ' . substr( $path, 0, 200 )
-			: 'qs: ' . substr( str_replace( array( "\r", "\n" ), ' ', rawurldecode( $qs ) ), 0, 200 );
+		if ( 'path' === $via ) {
+			$snippet = 'path: ' . substr( $path, 0, 200 );
+		} elseif ( 'ua' === $via ) {
+			$snippet = 'ua: ' . substr( $ua, 0, 200 );
+		} else {
+			$snippet = 'qs: ' . substr( str_replace( array( "\r", "\n" ), ' ', rawurldecode( $qs ) ), 0, 200 );
+		}
 
 		// Distinguishes a blind, internet-wide plugin-slug scan (mostly
 		// noise — the plugin was never here) from a probe that correctly

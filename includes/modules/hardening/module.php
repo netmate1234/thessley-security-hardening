@@ -24,12 +24,14 @@ class Thessley_Module_Hardening {
 	public static function deactivate() {
 		wp_clear_scheduled_hook( self::CRON_HOOK );
 		self::remove_uploads_guard();
+		self::remove_root_guard();
 	}
 
 	public static function register() {
 		add_action( 'admin_post_thessley_hd_save_settings', array( __CLASS__, 'handle_save_settings' ) );
 		add_action( 'admin_post_thessley_hd_scan_now', array( __CLASS__, 'handle_scan_now' ) );
 		add_action( self::CRON_HOOK, array( __CLASS__, 'scan_hidden_plugins' ) );
+		add_action( self::CRON_HOOK, array( __CLASS__, 'scan_exposed_files' ) );
 
 		if ( get_option( 'thessley_hardening_disable_file_edit', true ) && ! defined( 'DISALLOW_FILE_EDIT' ) ) {
 			// phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- this is WordPress core's own recognized constant name (the same one wp-config.php normally defines); prefixing it would make WP core stop recognizing it.
@@ -98,6 +100,196 @@ class Thessley_Module_Hardening {
 	public static function uploads_guard_active() {
 		$path = self::uploads_htaccess_path();
 		return file_exists( $path ) && false !== strpos( (string) file_get_contents( $path ), self::UPLOADS_GUARD_MARKER );
+	}
+
+
+	const ROOT_GUARD_MARKER = 'Thessley Security Hardening web-root guard';
+
+	/**
+	 * The plugin's checks only run when PHP runs. A file that physically
+	 * exists is handed to the client by the web server directly, so a
+	 * leftover wp-config.php.bak, a database dump or an error_log is
+	 * downloadable no matter what any blocking module says (a real
+	 * wp-config.php.bak was fetched twice this way while every signature
+	 * for it was active). This finds such files; it cannot delete them for
+	 * you — that is a decision about your data — but it names them and, on
+	 * Apache, can deny them at the server with a marked block in .htaccess.
+	 *
+	 * @return array<int, array{path:string,size:int,kind:string,level:string}>
+	 */
+	public static function find_exposed_files() {
+		$roots = array(
+			''                                  => untrailingslashit( ABSPATH ),
+			'wp-admin'                          => untrailingslashit( ABSPATH ) . '/wp-admin',
+			'wp-content'                        => untrailingslashit( WP_CONTENT_DIR ),
+			'wp-content/themes'                 => untrailingslashit( get_theme_root() ),
+			'wp-content/plugins'                => untrailingslashit( WP_PLUGIN_DIR ),
+			'wp-content/uploads'                => untrailingslashit( (string) ( wp_get_upload_dir()['basedir'] ?? '' ) ),
+		);
+
+		// [ regex on the file name, kind, level ]
+		$rules = array(
+			array( '/^wp-config(?!-sample)[^\/]*\.(?:bak|old|orig|save|swp|txt|zip|php~|copy|backup|1|2)$|^wp-config\.php[.~].+$|^wp-config\.[^.]+\.php$/i', 'wp-config backup', 'critical' ),
+			array( '/^\.env(?:\..+)?$|^\.htpasswd$|^\.git-credentials$/i', 'credentials file', 'critical' ),
+			array( '/\.(?:sql|sqlite3?|db)(?:\.gz|\.zip|\.bz2)?$|^(?:dump|backup|database)[\w.-]*\.(?:gz|zip)$/i', 'database dump', 'critical' ),
+			array( '/\.(?:zip|tar|tgz|gz|rar|7z)$/i', 'archive', 'high' ),
+			array( '/^(?:phpinfo|info|test|adminer[\w.-]*|shell|cmd|c99|r57)\.php$/i', 'debug / webshell-style script', 'high' ),
+			array( '/\.(?:bak|old|orig|save|swp)$|~$/i', 'backup copy', 'high' ),
+			array( '/^(?:error_log|debug\.log|php_errorlog)$|\.log$/i', 'log file', 'medium' ),
+			array( '/^(?:readme\.html|license\.txt|wp-config-sample\.php)$/i', 'version / install disclosure', 'low' ),
+		);
+
+		$found = array();
+		foreach ( $roots as $rel_root => $dir ) {
+			if ( '' === $dir || ! is_dir( $dir ) || ! is_readable( $dir ) ) {
+				continue;
+			}
+			foreach ( (array) scandir( $dir ) as $name ) {
+				if ( '.' === $name || '..' === $name ) {
+					continue;
+				}
+				$full = $dir . '/' . $name;
+				$rel  = ltrim( $rel_root . '/' . $name, '/' );
+
+				if ( is_dir( $full ) ) {
+					if ( in_array( strtolower( $name ), array( '.git', '.svn', '.hg' ), true ) && '' === $rel_root ) {
+						$found[] = array( 'path' => $rel . '/', 'size' => 0, 'kind' => 'source-control folder', 'level' => 'critical' );
+					}
+					continue;
+				}
+
+				foreach ( $rules as $rule ) {
+					if ( preg_match( $rule[0], $name ) ) {
+						// Archives under uploads are ordinary media downloads and
+						// logs under themes/plugins are rare; only flag them where
+						// they do not belong.
+						if ( 'wp-content/uploads' === $rel_root && in_array( $rule[1], array( 'archive', 'log file', 'backup copy' ), true ) ) {
+							continue 2;
+						}
+						$found[] = array( 'path' => $rel, 'size' => (int) filesize( $full ), 'kind' => $rule[1], 'level' => $rule[2] );
+						continue 2;
+					}
+				}
+			}
+		}
+
+		return $found;
+	}
+
+	/**
+	 * Cron/manual entry point: stores the findings and logs one event only
+	 * when the set of findings changes, so a file that stays put does not
+	 * re-alert twice a day.
+	 */
+	public static function scan_exposed_files() {
+		$files = self::find_exposed_files();
+		$sig   = md5( wp_json_encode( wp_list_pluck( $files, 'path' ) ) );
+		$prev  = get_option( 'thessley_hardening_exposed_result', array() );
+
+		update_option( 'thessley_hardening_exposed_result', array( 'at' => time(), 'files' => $files, 'sig' => $sig ), false );
+
+		$serious = array_filter(
+			$files,
+			function ( $f ) {
+				return in_array( $f['level'], array( 'critical', 'high' ), true );
+			}
+		);
+
+		if ( $serious && ( $prev['sig'] ?? '' ) !== $sig ) {
+			$critical = array_filter(
+				$serious,
+				function ( $f ) {
+					return 'critical' === $f['level'];
+				}
+			);
+			thessley_log_event(
+				'hardening',
+				'exposed_files',
+				'noted',
+				sprintf( '%d sensitive file(s) in the web root the web server will hand out: %s', count( $serious ), implode( ', ', array_slice( wp_list_pluck( $serious, 'path' ), 0, 5 ) ) ),
+				$critical ? 18 : 12
+			);
+		}
+
+		return $files;
+	}
+
+	private static function root_htaccess_path() {
+		if ( ! function_exists( 'get_home_path' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+		}
+		return get_home_path() . '.htaccess';
+	}
+
+	/**
+	 * Server-level deny rules for the files above, written with WordPress'
+	 * own insert_with_markers() between marked lines so they can be removed
+	 * cleanly. Apache only (mod_rewrite, which permalinks already need).
+	 * Nothing here can be reached by PHP, which is exactly why it has to
+	 * live in the server config.
+	 *
+	 * @return string[]
+	 */
+	public static function root_guard_rules() {
+		return array(
+			'<IfModule mod_rewrite.c>',
+			'RewriteEngine On',
+			'# Version / install disclosure',
+			'RewriteRule ^(?:readme\.html|license\.txt|wp-config-sample\.php|wp-includes/ID3/license\.txt)$ - [F,L,NC]',
+			'# wp-config backups, database dumps, backup copies',
+			'RewriteRule ^wp-config(?!-sample)[^/]*$ - [F,L,NC]',
+			'RewriteRule ^(?:[^/]+/)*[^/]*\.(?:sql|sqlite3?|bak|old|orig|save|swp)(?:\.gz|\.zip)?$ - [F,L,NC]',
+			'RewriteRule ^(?:[^/]+/)*[^/]*~$ - [F,L,NC]',
+			'# Archives left in the web root, wp-content, themes and plugins (not uploads)',
+			'RewriteRule ^(?:wp-content/(?:themes|plugins)/|wp-content/|)[^/]+\.(?:zip|tar|tgz|gz|rar|7z)$ - [F,L,NC]',
+			'# Log files anywhere',
+			'RewriteRule ^(?:[^/]+/)*(?:error_log|php_errorlog|debug\.log|[^/]*\.log)$ - [F,L,NC]',
+			'</IfModule>',
+		);
+	}
+
+	public static function write_root_guard() {
+		if ( ! function_exists( 'insert_with_markers' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/misc.php';
+		}
+		$file = self::root_htaccess_path();
+		if ( ! wp_is_writable( dirname( $file ) ) && ! ( file_exists( $file ) && wp_is_writable( $file ) ) ) {
+			return false;
+		}
+		return (bool) insert_with_markers( $file, self::ROOT_GUARD_MARKER, self::root_guard_rules() );
+	}
+
+	public static function remove_root_guard() {
+		$file = self::root_htaccess_path();
+		if ( ! file_exists( $file ) ) {
+			return;
+		}
+		$content = (string) file_get_contents( $file );
+		$cleaned = preg_replace(
+			'/\n?# BEGIN ' . preg_quote( self::ROOT_GUARD_MARKER, '/' ) . '.*?# END ' . preg_quote( self::ROOT_GUARD_MARKER, '/' ) . '\n?/s',
+			'',
+			$content
+		);
+		if ( $cleaned === $content ) {
+			return;
+		}
+		$cleaned = '' === trim( (string) $cleaned ) ? '' : rtrim( (string) $cleaned ) . "\n";
+		// Only this plugin's block is removed; if nothing else was in the
+		// file, the file this plugin created goes with it.
+		if ( '' === trim( (string) $cleaned ) ) {
+			Thessley_Module_Loader::fs_delete( $file );
+		} else {
+			Thessley_Module_Loader::fs_put_contents( $file, $cleaned );
+		}
+	}
+
+	public static function root_guard_active() {
+		$file = self::root_htaccess_path();
+		if ( ! file_exists( $file ) ) {
+			return false;
+		}
+		$content = (string) file_get_contents( $file );
+		return false !== strpos( $content, '# BEGIN ' . self::ROOT_GUARD_MARKER ) && false !== strpos( $content, 'RewriteRule' );
 	}
 
 	private static function is_apache() {
@@ -190,6 +382,7 @@ class Thessley_Module_Hardening {
 			wp_die( 'Forbidden', 403 );
 		}
 		self::scan_hidden_plugins();
+		self::scan_exposed_files();
 		wp_safe_redirect( add_query_arg( 'scanned', '1', wp_get_referer() ) );
 		exit;
 	}
@@ -214,6 +407,16 @@ class Thessley_Module_Hardening {
 			self::remove_uploads_guard();
 		}
 
+		$want_root = isset( $_POST['root_guard'] );
+		update_option( 'thessley_hardening_root_guard', $want_root );
+		if ( $want_root ) {
+			if ( ! self::write_root_guard() ) {
+				$notice = 'rootfail';
+			}
+		} else {
+			self::remove_root_guard();
+		}
+
 		wp_safe_redirect( add_query_arg( 'saved', $notice, wp_get_referer() ) );
 		exit;
 	}
@@ -224,6 +427,15 @@ class Thessley_Module_Hardening {
 		$guard_active  = self::uploads_guard_active();
 		$file_edit_off = defined( 'DISALLOW_FILE_EDIT' ) && DISALLOW_FILE_EDIT;
 		$hidden        = (array) ( $hidden_result['hidden'] ?? array() );
+		$exposed_res   = get_option( 'thessley_hardening_exposed_result', array() );
+		$exposed       = (array) ( $exposed_res['files'] ?? array() );
+		$root_active   = self::root_guard_active();
+		$serious       = array_filter(
+			$exposed,
+			function ( $f ) {
+				return in_array( $f['level'], array( 'critical', 'high' ), true );
+			}
+		);
 
 		Thessley_UI::open( 'hardening' );
 
@@ -232,6 +444,8 @@ class Thessley_Module_Hardening {
 			Thessley_UI::notice( 'success', 'Settings saved.' );
 		} elseif ( isset( $_GET['saved'] ) && 'guardfail' === $_GET['saved'] ) {
 			Thessley_UI::notice( 'error', 'Could not write ' . self::uploads_htaccess_path() . ' — check filesystem permissions.' );
+		} elseif ( isset( $_GET['saved'] ) && 'rootfail' === $_GET['saved'] ) {
+			Thessley_UI::notice( 'error', 'Could not write ' . self::root_htaccess_path() . ' — check filesystem permissions.' );
 		}
 		if ( isset( $_GET['scanned'] ) ) {
 			Thessley_UI::notice( 'success', 'Scan complete.' );
@@ -258,8 +472,32 @@ class Thessley_Module_Hardening {
 					'value' => $hidden ? (string) count( $hidden ) : '0',
 					'label' => 'hidden plugins',
 				),
+				array(
+					'icon'  => $serious ? 'dismiss' : 'yes-alt',
+					'tone'  => $serious ? 'bad' : 'good',
+					'value' => (string) count( $serious ),
+					'label' => 'sensitive files exposed',
+				),
 			)
 		);
+
+		Thessley_UI::section( 'Exposed files', 'media-archive' );
+		echo '<p class="thessley-help" style="margin-top:0">Blocking modules only run when PHP runs. A file that physically exists in the web root is served by the web server itself, so a leftover backup, database dump or error log can be downloaded no matter what the blocking modules say. Delete or move these; the web-root protection below denies them at the server as a safety net.</p>';
+		if ( empty( $exposed_res ) ) {
+			echo '<div class="thessley-empty"><span class="dashicons dashicons-marker" style="color:#646970"></span><p>Not scanned yet.</p></div>';
+		} elseif ( empty( $exposed ) ) {
+			echo '<div class="thessley-empty"><span class="dashicons dashicons-yes-alt"></span><p>No sensitive files found in the web root.</p></div>';
+		} else {
+			echo '<table class="widefat striped" style="max-width:820px"><thead><tr><th>File</th><th>What it is</th><th>Size</th><th>Risk</th></tr></thead><tbody>';
+			foreach ( $exposed as $f ) {
+				$tone = 'critical' === $f['level'] ? 'bad' : ( 'high' === $f['level'] ? 'warn' : 'quiet' );
+				echo '<tr><td><code>' . esc_html( $f['path'] ) . '</code></td><td>' . esc_html( $f['kind'] ) . '</td><td>' . esc_html( $f['size'] ? size_format( $f['size'] ) : '' ) . '</td><td>';
+				Thessley_UI::badge( $f['level'], $tone );
+				echo '</td></tr>';
+			}
+			echo '</tbody></table>';
+		}
+		Thessley_UI::section_end();
 
 		Thessley_UI::section( 'Hidden plugins', 'visibility' );
 		echo '<p class="thessley-help" style="margin-top:0">Files with a plugin header that exist on disk but do not appear in the Plugins screen. A backdoor can filter itself out of that list while staying active, so this compares against the filtered list the admin actually sees.</p>';
@@ -329,6 +567,20 @@ class Thessley_Module_Hardening {
 						}
 					},
 					'Writes an <code>.htaccess</code> into the uploads folder. Any attacker who gets an arbitrary-file-upload primitive lands there first, and a .php file that cannot execute is inert.'
+				);
+
+				Thessley_UI::row(
+					'Web-root protection',
+					function () use ( $root_active, $is_apache ) {
+						?>
+						<label><input type="checkbox" name="root_guard" <?php checked( get_option( 'thessley_hardening_root_guard', false ) ); ?>> Deny backups, dumps, logs, archives and version files at the web server</label>
+						<?php
+						Thessley_UI::badge( $root_active ? 'active' : 'not active', $root_active ? 'good' : 'warn' );
+						if ( ! $is_apache ) {
+							echo '<p class="thessley-help"><strong>This server does not look like Apache.</strong> nginx ignores <code>.htaccess</code>, so add an equivalent rule to the server block:<br><code>location ~* (?:^/(?:readme\.html|license\.txt|wp-config-sample\.php)$|wp-config[^/]*$|\.(?:sql|bak|old|orig|save|swp|log)$|/error_log$|~$) { deny all; }</code></p>';
+						}
+					},
+					'Adds a marked block to the site\'s root <code>.htaccess</code> (removed again when unchecked or when this plugin is deactivated). Stops the server handing out files such as <code>wp-config.php.bak</code>, <code>*.sql</code>, <code>error_log</code>, <code>readme.html</code> and archives left in the web root, none of which the blocking modules can see.'
 				);
 				?>
 			<?php Thessley_UI::section_end(); ?>
