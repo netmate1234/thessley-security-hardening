@@ -272,8 +272,8 @@ thessley_register_check(
 		// parse_url() is avoided deliberately: a leading "//" makes it read the
 		// URI as protocol-relative, so "//xmlrpc.php" parses as a *host* with
 		// no path and the check would be skipped entirely.
-		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- must inspect the raw request path to detect xmlrpc.php; sanitizing it here would risk altering the very string this security check matches against.
-		$uri  = (string) ( $_SERVER['REQUEST_URI'] ?? '' );
+		// Raw on purpose, matched only (see thessley_request_uri()).
+		$uri  = thessley_request_uri();
 		$path = rawurldecode( strtok( $uri, '?' ) );
 		$path = preg_replace( '#/+#', '/', $path ); // collapse // and ///
 		if ( ! preg_match( '#(?:^|/)xmlrpc\.php(?:/|$)#i', (string) $path ) ) {
@@ -351,11 +351,13 @@ thessley_register_check(
 			return null;
 		}
 
-		// phpcs:disable WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- must inspect the raw request path/query string for attack signatures; sanitizing it here would strip the very content this scan exists to detect.
-		$uri  = (string) ( $_SERVER['REQUEST_URI'] ?? '' );
+		// Raw on purpose, for matching only (see thessley_request_uri()): the
+		// signatures have to see the payload as sent. Everything derived from
+		// these that is stored, alerted on or reported below goes through
+		// thessley_clean_detail() first.
+		$uri  = thessley_request_uri();
 		$path = rawurldecode( strtok( $uri, '?' ) );
-		$qs   = isset( $_SERVER['QUERY_STRING'] ) ? (string) $_SERVER['QUERY_STRING'] : '';
-		// phpcs:enable WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
+		$qs   = thessley_query_string();
 
 		// Path probes run first and unconditionally — a request with no
 		// query string at all used to skip this whole check, missing
@@ -383,11 +385,11 @@ thessley_register_check(
 
 		$mode    = get_option( 'thessley_query_guard_mode', 'log' );
 		if ( 'path' === $via ) {
-			$snippet = 'path: ' . substr( $path, 0, 200 );
+			$snippet = 'path: ' . substr( thessley_clean_detail( $path ), 0, 200 );
 		} elseif ( 'ua' === $via ) {
-			$snippet = 'ua: ' . substr( $ua, 0, 200 );
+			$snippet = 'ua: ' . substr( thessley_clean_detail( $ua ), 0, 200 );
 		} else {
-			$snippet = 'qs: ' . substr( str_replace( array( "\r", "\n" ), ' ', rawurldecode( $qs ) ), 0, 200 );
+			$snippet = 'qs: ' . substr( thessley_clean_detail( rawurldecode( $qs ) ), 0, 200 );
 		}
 
 		// Distinguishes a blind, internet-wide plugin-slug scan (mostly

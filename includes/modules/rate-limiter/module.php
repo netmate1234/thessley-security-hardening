@@ -60,8 +60,7 @@ class Thessley_Module_Rate_Limiter {
 			return;
 		}
 
-		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- only parsed for its path and compared/hashed, never output or stored raw.
-		$path = (string) wp_parse_url( (string) ( $_SERVER['REQUEST_URI'] ?? '' ), PHP_URL_PATH );
+		$path = (string) wp_parse_url( thessley_request_uri(), PHP_URL_PATH );
 		if ( preg_match( '/\.(?:jpe?g|png|gif|webp|avif|svg|ico|css|js|map|woff2?|ttf|eot|otf|mp[34]|webm)$/i', $path ) ) {
 			return;
 		}

@@ -18,8 +18,8 @@ if ( ! function_exists( 'thessley_geo_login_is_login_request' ) ) {
 	 * and //wp-login.php bypasses that applied to xmlrpc.php apply here.
 	 */
 	function thessley_geo_login_is_login_request() {
-		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash, WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- must inspect the raw request path to detect wp-login.php; sanitizing it here would risk altering the very string this security check is matching against.
-		$uri  = (string) ( $_SERVER['REQUEST_URI'] ?? '' );
+		// Raw on purpose, matched only (see thessley_request_uri()).
+		$uri  = thessley_request_uri();
 		$path = rawurldecode( strtok( $uri, '?' ) );
 		$path = preg_replace( '#/+#', '/', $path );
 		return (bool) preg_match( '#(?:^|/)wp-login\.php(?:/|$)#i', (string) $path );

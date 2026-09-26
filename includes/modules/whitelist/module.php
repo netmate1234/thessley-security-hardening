@@ -158,8 +158,7 @@ class Thessley_Module_Whitelist {
 			wp_die( 'Forbidden', 403 );
 		}
 
-		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- validated below via filter_var( ..., FILTER_VALIDATE_URL ) before it's ever stored.
-		$trusted_url_raw = isset( $_POST['trusted_networks_url'] ) ? trim( wp_unslash( $_POST['trusted_networks_url'] ) ) : '';
+		$trusted_url_raw = isset( $_POST['trusted_networks_url'] ) ? trim( esc_url_raw( wp_unslash( $_POST['trusted_networks_url'] ), array( 'http', 'https' ) ) ) : '';
 		$trusted_url     = ( '' !== $trusted_url_raw && false !== filter_var( $trusted_url_raw, FILTER_VALIDATE_URL ) ) ? $trusted_url_raw : '';
 		$url_changed     = $trusted_url !== get_option( 'thessley_trusted_networks_url', '' );
 		update_option( 'thessley_trusted_networks_url', $trusted_url );
@@ -170,8 +169,7 @@ class Thessley_Module_Whitelist {
 			self::refresh();
 		}
 
-		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- each line is validated below via filter_var( ..., FILTER_VALIDATE_IP ); anything that isn't a real IPv4 address is discarded before update_option().
-		$raw  = isset( $_POST['allowlist'] ) ? wp_unslash( $_POST['allowlist'] ) : '';
+		$raw  = isset( $_POST['allowlist'] ) ? sanitize_textarea_field( wp_unslash( $_POST['allowlist'] ) ) : '';
 		$list = array_filter( array_map( 'trim', preg_split( '/[\r\n,]+/', $raw ) ) );
 		$list = array_values(
 			array_filter(

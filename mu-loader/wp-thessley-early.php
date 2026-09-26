@@ -66,6 +66,45 @@ if ( ! function_exists( 'thessley_data_file' ) ) {
 	}
 }
 
+if ( ! function_exists( 'thessley_request_uri' ) ) {
+	/**
+	 * The request URI exactly as sent, un-slashed but otherwise untouched.
+	 *
+	 * This is the one place the raw value is read for inspection. Attack
+	 * signatures have to match the bytes the client actually sent (a
+	 * sanitised copy would have the payload stripped out before it was
+	 * compared), so nothing here can be sanitised. The value is never echoed
+	 * or stored as-is: anything that reaches the event log, an alert or a
+	 * report goes through thessley_clean_detail() / esc_url_raw() first.
+	 */
+	function thessley_request_uri() {
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- read for signature matching only; see the docblock above. Sanitised before any storage or output.
+		return isset( $_SERVER['REQUEST_URI'] ) ? wp_unslash( (string) $_SERVER['REQUEST_URI'] ) : '';
+	}
+}
+
+if ( ! function_exists( 'thessley_query_string' ) ) {
+	/** Raw query string for signature matching only; same reasoning as thessley_request_uri(). */
+	function thessley_query_string() {
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- read for signature matching only; sanitised before any storage or output.
+		return isset( $_SERVER['QUERY_STRING'] ) ? wp_unslash( (string) $_SERVER['QUERY_STRING'] ) : '';
+	}
+}
+
+if ( ! function_exists( 'thessley_clean_detail' ) ) {
+	/**
+	 * Makes a snippet of request data safe to store, alert on and report.
+	 * Angle brackets become look-alike single quotation marks first, so an
+	 * XSS probe stays readable in the log ("‹script›alert(1)‹/script›")
+	 * instead of being stripped to nothing by tag removal, then
+	 * sanitize_text_field() strips anything else (control characters,
+	 * line breaks, percent-octets, invalid UTF-8).
+	 */
+	function thessley_clean_detail( $text ) {
+		return sanitize_text_field( str_replace( array( '<', '>' ), array( '‹', '›' ), (string) $text ) );
+	}
+}
+
 if ( ! function_exists( 'thessley_client_ip' ) ) {
 	function thessley_client_ip() {
 		// An IP address contains only digits, dots and (for IPv6) colons/hex,
@@ -233,7 +272,7 @@ if ( ! function_exists( 'thessley_log_event' ) ) {
 		global $wpdb;
 
 		$ip     = thessley_client_ip();
-		$detail = substr( str_replace( array( "\r", "\n" ), ' ', (string) $detail ), 0, 500 );
+		$detail = substr( thessley_clean_detail( $detail ), 0, 500 );
 
 		$severity = ( null === $severity )
 			? thessley_event_severity( $module, $event, $action )
@@ -924,9 +963,17 @@ $GLOBALS['thessley_checks'] = array();
 	if ( is_string( $folder ) && preg_match( '/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/', $folder ) && is_array( $slugs ) ) {
 		// Alphabetical by slug: the same order the old per-file glob() gave.
 		sort( $slugs );
+		// realpath() only resolves paths on the local filesystem (it returns
+		// false for a URL or stream wrapper), and the resolved file must sit
+		// inside this plugin's own folder, so this can only ever load a local
+		// check.php that ships with the plugin, never a remote file.
+		$plugin_root = realpath( WP_PLUGIN_DIR . '/' . $folder );
 		foreach ( $slugs as $slug ) {
-			$check_file = WP_PLUGIN_DIR . '/' . $folder . '/includes/modules/' . $slug . '/check.php';
-			if ( is_string( $slug ) && preg_match( '/^[a-z0-9-]+$/', $slug ) && is_readable( $check_file ) ) {
+			if ( ! is_string( $slug ) || ! preg_match( '/^[a-z0-9-]+$/', $slug ) || false === $plugin_root ) {
+				continue;
+			}
+			$check_file = realpath( $plugin_root . '/includes/modules/' . $slug . '/check.php' );
+			if ( false !== $check_file && 0 === strpos( $check_file, $plugin_root . DIRECTORY_SEPARATOR ) && is_readable( $check_file ) ) {
 				require $check_file;
 			}
 		}

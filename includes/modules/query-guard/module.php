@@ -205,7 +205,7 @@ class Thessley_Module_Query_Guard {
 				if ( '' !== $name && is_string( $name ) && preg_match( self::dangerous_upload_regex(), $name ) ) {
 					return array(
 						'id'     => 'upload_executable_ext',
-						'detail' => sprintf( 'field "%s" filename "%s"', $field, substr( (string) $name, 0, 100 ) ),
+						'detail' => thessley_clean_detail( sprintf( 'field "%s" filename "%s"', $field, substr( (string) $name, 0, 100 ) ) ),
 					);
 				}
 			}
@@ -223,7 +223,7 @@ class Thessley_Module_Query_Guard {
 				if ( preg_match( $p['regex'], $value ) ) {
 					return array(
 						'id'     => $p['id'],
-						'detail' => sprintf( 'field "%s": %s', $key, substr( preg_replace( '/\s+/', ' ', $value ), 0, 120 ) ),
+						'detail' => thessley_clean_detail( sprintf( 'field "%s": %s', $key, substr( preg_replace( '/\s+/', ' ', $value ), 0, 120 ) ) ),
 					);
 				}
 			}
