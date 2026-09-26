@@ -56,6 +56,7 @@ class Thessley_Module_IP_Blocklist {
 		$stats   = Thessley_IP_Blocklist_Compiler::compile( $ranges );
 
 		$stats['updated_at'] = time();
+		$stats['problems']   = Thessley_IP_Blocklist_Fetcher::$problems;
 		update_option( 'thessley_ip_blocklist_stats', $stats, false );
 
 		// Piggyback the local blocklist's expiry sweep on this same cron run —
@@ -199,6 +200,14 @@ class Thessley_Module_IP_Blocklist {
 					'<tr><td>%s</td><td>%s</td></tr>',
 					esc_html( $label ),
 					esc_html( number_format_i18n( $count ) )
+				);
+			}
+			foreach ( (array) ( $stats['problems'] ?? array() ) as $src => $why ) {
+				$label = Thessley_IP_Blocklist_Fetcher::SOURCES[ $src ]['label'] ?? ucfirst( $src );
+				printf(
+					'<tr><td>%s</td><td><span class="thessley-badge thessley-badge--warn">%s</span></td></tr>',
+					esc_html( $label ),
+					esc_html( 'no entries: ' . $why )
 				);
 			}
 			printf(

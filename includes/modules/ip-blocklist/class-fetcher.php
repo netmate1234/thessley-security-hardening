@@ -65,7 +65,8 @@ class Thessley_IP_Blocklist_Fetcher {
 	 * @return array<int, array{0:int,1:int,2:string}> ranges as [start, end, source]
 	 */
 	public static function fetch_all( array $enabled ) {
-		$ranges = array();
+		$ranges         = array();
+		self::$problems = array();
 
 		foreach ( self::SOURCES as $id => $source ) {
 			if ( ! in_array( $id, $enabled, true ) ) {
@@ -76,6 +77,7 @@ class Thessley_IP_Blocklist_Fetcher {
 			if ( 'unwantedip_key' === ( $source['auth'] ?? '' ) ) {
 				$key = trim( (string) get_option( 'thessley_unwantedip_api_key', '' ) );
 				if ( '' === $key ) {
+					self::$problems[ $id ] = 'needs an API key (set one on the IP Sharing tab)';
 					continue; // not set up yet — not a fetch failure, just nothing to fetch with
 				}
 				$headers['X-API-Key'] = $key;
@@ -83,10 +85,14 @@ class Thessley_IP_Blocklist_Fetcher {
 
 			$body = self::download( $source['url'], $headers );
 			if ( false === $body ) {
+				self::$problems[ $id ] = 'download failed (' . self::$last_error . ')';
 				continue;
 			}
 
 			$parsed = self::parse( $source['type'], $body );
+			if ( ! $parsed ) {
+				self::$problems[ $id ] = 'downloaded, but it contained no usable entries';
+			}
 
 			foreach ( $parsed as $range ) {
 				$ranges[] = array( $range[0], $range[1], $id );
@@ -109,7 +115,20 @@ class Thessley_IP_Blocklist_Fetcher {
 		}
 	}
 
+	/**
+	 * Enabled sources that contributed nothing on the last fetch_all(), with
+	 * the reason. Without this a feed that fails (a server error, a missing
+	 * key) simply never shows up in the Reputation feeds table and looks
+	 * like it was never enabled.
+	 *
+	 * @var array<string,string>
+	 */
+	public static $problems = array();
+
+	private static $last_error = '';
+
 	private static function download( $url, array $headers = array() ) {
+		self::$last_error = '';
 		$response = wp_remote_get(
 			$url,
 			array(
@@ -119,7 +138,12 @@ class Thessley_IP_Blocklist_Fetcher {
 			)
 		);
 
-		if ( is_wp_error( $response ) || 200 !== wp_remote_retrieve_response_code( $response ) ) {
+		if ( is_wp_error( $response ) ) {
+			self::$last_error = $response->get_error_message();
+			return false;
+		}
+		if ( 200 !== wp_remote_retrieve_response_code( $response ) ) {
+			self::$last_error = 'HTTP ' . wp_remote_retrieve_response_code( $response );
 			return false;
 		}
 
