@@ -4,7 +4,7 @@ Tags: security, firewall, malware, geo-blocking, brute-force
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.19
+Stable tag: 1.0.20
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -152,6 +152,15 @@ Opt-in. Sends a message to a Telegram chat you control when a security event exc
 Opt-in. Uses this site's own mail system, not a third-party service, so nothing is sent to any server listed here.
 
 == Changelog ==
+
+= 1.0.20 =
+* Query Guard: new signatures for credential and dot-folder probes (cloud CLIs, SSH keys, AI-tool config folders), root-level secret/project files, framework debug endpoints, webshell filenames, any `/.git` path, `/wp-login.php/<path>` recon, NUL-byte paths, `.env` with several suffixes and the wp2shell `_u=` marker, plus an explicit list of self-identifying scanner User-Agents. Sweeps are now stopped at their first request instead of after a few dozen.
+* Login Guard: burst rule (default 3 failures within 10 seconds) that catches low-and-slow botnets which stay under the per-window threshold by giving every IP only a few tries.
+* Rate Limiter: 404-probing detector (default 10 different missing pages within 60 seconds per IP), ignoring missing images/CSS/JS, visits following a broken link on the same site, and logged-in users.
+* Hardening: scans the web root for files the web server would hand out without PHP running (wp-config backups, database dumps, archives, logs, readme.html/license.txt) and offers an opt-in, fully reversible `.htaccess` block that denies them.
+* IP Blocklist: a feed that is enabled but returned nothing now shows in the Reputation feeds table with the reason, instead of silently disappearing.
+* Review fixes: request data (URI, query string, upload names, POST values) is sanitized before it is stored, alerted on or reported; the Whitelist URL and allowlist inputs are sanitized before validation; the early-request loader only loads check files that resolve inside the plugin's own folder.
+* readme: removed Cloudflare from the description of the default trusted-networks list.
 
 = 1.0.19 =
 * Nothing but a single must-use loader is written into wp-content any more. The per-module check files are no longer copied into wp-content/mu-plugins/wp-thessley-checks: the loader requires each enabled module's check.php directly from the plugin folder.
