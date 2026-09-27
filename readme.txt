@@ -4,7 +4,7 @@ Tags: security, firewall, malware, geo-blocking, brute-force
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.21
+Stable tag: 1.0.22
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -152,6 +152,9 @@ Opt-in. Sends a message to a Telegram chat you control when a security event exc
 Opt-in. Uses this site's own mail system, not a third-party service, so nothing is sent to any server listed here.
 
 == Changelog ==
+
+= 1.0.22 =
+* Hardening: fixed the web-root protection's archive/backup/log rules so a bundled plugin's own .htaccess under wp-content/ (WP Fastest Cache, Converter for Media and similar, which turn RewriteEngine back on with RewriteOptions Inherit) can no longer strip the path prefix a rule was anchored to and silently defeat it. Confirmed live: a 21MB theme .zip left in wp-content/themes stayed downloadable through the guard on a real site until this fix. Rules now test the full request path instead of a per-directory-relative one.
 
 = 1.0.21 =
 * unwantedip reporting: the per-IP one-report-per-hour cooldown was keyed only on the IP, so an IP's first blocked detection silenced every other kind of detection from that same IP for the rest of the hour. Now keyed on IP + module + event, so a genuinely new alert type on an already-seen IP is still reported.

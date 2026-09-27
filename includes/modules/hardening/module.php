@@ -230,20 +230,41 @@ class Thessley_Module_Hardening {
 	 *
 	 * @return string[]
 	 */
+	/**
+	 * Every condition tests %{REQUEST_URI} — the full original request path
+	 * — rather than encoding the path into the RewriteRule pattern itself.
+	 * Confirmed live on a real site: a bundled plugin's own .htaccess under
+	 * wp-content/ (WP Fastest Cache, Converter for Media, etc.) turns
+	 * RewriteEngine on again with RewriteOptions Inherit, which re-runs the
+	 * inherited rules against the path *relative to that subdirectory* —
+	 * stripping the "wp-content/" prefix a RewriteRule pattern was
+	 * anchored to, so it silently never matched a theme's leftover .zip
+	 * there. %{REQUEST_URI} is always the full path regardless of which
+	 * per-directory context is currently evaluating it, so it isn't
+	 * affected by that stripping.
+	 */
 	public static function root_guard_rules() {
 		return array(
 			'<IfModule mod_rewrite.c>',
 			'RewriteEngine On',
-			'# Version / install disclosure',
-			'RewriteRule ^(?:readme\.html|license\.txt|wp-config-sample\.php|wp-includes/ID3/license\.txt)$ - [F,L,NC]',
-			'# wp-config backups, database dumps, backup copies',
-			'RewriteRule ^wp-config(?!-sample)[^/]*$ - [F,L,NC]',
-			'RewriteRule ^(?:[^/]+/)*[^/]*\.(?:sql|sqlite3?|bak|old|orig|save|swp)(?:\.gz|\.zip)?$ - [F,L,NC]',
-			'RewriteRule ^(?:[^/]+/)*[^/]*~$ - [F,L,NC]',
-			'# Archives left in the web root, wp-content, themes and plugins (not uploads)',
-			'RewriteRule ^(?:wp-content/(?:themes|plugins)/|wp-content/|)[^/]+\.(?:zip|tar|tgz|gz|rar|7z)$ - [F,L,NC]',
-			'# Log files anywhere',
-			'RewriteRule ^(?:[^/]+/)*(?:error_log|php_errorlog|debug\.log|[^/]*\.log)$ - [F,L,NC]',
+			'# Version / install disclosure — only the well-known files at the site root.',
+			'RewriteCond %{REQUEST_URI} ^/(?:readme\.html|license\.txt|wp-config-sample\.php)$ [NC,OR]',
+			'RewriteCond %{REQUEST_URI} ^/wp-includes/ID3/license\.txt$ [NC]',
+			'RewriteRule ^ - [F,L]',
+			'# wp-config backups, at the site root only (where wp-config.php itself lives).',
+			'RewriteCond %{REQUEST_URI} ^/wp-config(?!-sample)[^/]*$ [NC]',
+			'RewriteRule ^ - [F,L]',
+			'# Database dumps, backup copies and tilde-backups, anywhere.',
+			'RewriteCond %{REQUEST_URI} \.(?:sql|sqlite3?|bak|old|orig|save|swp)(?:\.gz|\.zip)?$ [NC,OR]',
+			'RewriteCond %{REQUEST_URI} ~$ [NC]',
+			'RewriteRule ^ - [F,L]',
+			'# Archives anywhere except inside uploads (a real uploaded file can legitimately be a .zip there).',
+			'RewriteCond %{REQUEST_URI} !/wp-content/uploads/',
+			'RewriteCond %{REQUEST_URI} \.(?:zip|tar|tgz|gz|rar|7z)$ [NC]',
+			'RewriteRule ^ - [F,L]',
+			'# Log files, anywhere.',
+			'RewriteCond %{REQUEST_URI} (?:^|/)(?:error_log|php_errorlog|debug\.log|[^/]*\.log)$ [NC]',
+			'RewriteRule ^ - [F,L]',
 			'</IfModule>',
 		);
 	}
