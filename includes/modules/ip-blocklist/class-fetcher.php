@@ -11,9 +11,11 @@ class Thessley_IP_Blocklist_Fetcher {
 
 	/**
 	 * Source registry. 'type' selects the parser:
-	 *   ip_list    - one bare IPv4 per line, '#' comments
-	 *   range_list - "start end ..." whitespace-delimited per line, '#' comments
-	 *   cidr_list  - CIDR or bare IPv4 per line, '#' full-line or ';' inline comments
+	 *   ip_list       - one bare IPv4 per line, '#' comments
+	 *   range_list    - "start end ..." whitespace-delimited per line, '#' comments
+	 *   cidr_list     - CIDR or bare IPv4 per line, '#' full-line or ';' inline comments
+	 *   ip_count_list - "ip<TAB or spaces>count" per line, '#' comments; only
+	 *                   lines whose count meets IPSUM_MIN_COUNT are kept
 	 */
 	const SOURCES = array(
 		'cins'           => array(
@@ -46,6 +48,21 @@ class Thessley_IP_Blocklist_Fetcher {
 			'url'   => 'https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/et_tor.ipset', // phpcs:ignore PluginCheck.CodeAnalysis.Offloading.OffloadedContent -- same as firehol_level1 above.
 			'type'  => 'ip_list',
 		),
+		'ipsum'          => array(
+			'label' => 'IPsum (aggregates 30+ public blocklists, count >= ' . self::IPSUM_MIN_COUNT . ')',
+			'url'   => 'https://raw.githubusercontent.com/stamparm/ipsum/master/ipsum.txt', // phpcs:ignore PluginCheck.CodeAnalysis.Offloading.OffloadedContent -- a plain-text threat-feed URL fetched server-side (wp_remote_get) to compile a local blocklist, not a front-end JS/CSS/image asset.
+			'type'  => 'ip_count_list',
+		),
+		'firehol_webserver' => array(
+			'label' => 'FireHOL webserver (IPs attacking web servers specifically)',
+			'url'   => 'https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_webserver.netset', // phpcs:ignore PluginCheck.CodeAnalysis.Offloading.OffloadedContent -- same as firehol_level1 above.
+			'type'  => 'cidr_list',
+		),
+		'reportedip_cms' => array(
+			'label' => 'ReportedIP CMS-login (WordPress/Drupal/CMS backend-login attackers)',
+			'url'   => 'https://raw.githubusercontent.com/reportedip/reportedip-blacklist/main/lists/cms-login.txt', // phpcs:ignore PluginCheck.CodeAnalysis.Offloading.OffloadedContent -- same as firehol_level1 above.
+			'type'  => 'ip_list',
+		),
 		'unwantedip_wp'  => array(
 			'label' => 'unwantedip.eagleeye-intelligence.com (WordPress-targeting IPs, 90d)',
 			'url'   => 'https://unwantedip.eagleeye-intelligence.com/api/v1/feed/wordpress',
@@ -59,6 +76,11 @@ class Thessley_IP_Blocklist_Fetcher {
 	);
 
 	const DEFAULT_ENABLED = array( 'cins', 'dshield' );
+
+	// IPsum's own count is how many of its ~30 source blocklists flagged the
+	// address. 1 alone is noisy (most of the list); 3+ means at least three
+	// independent sources agree, a reasonable low-false-positive floor.
+	const IPSUM_MIN_COUNT = 3;
 
 	/**
 	 * @param string[] $enabled source ids from self::SOURCES to fetch
@@ -110,6 +132,8 @@ class Thessley_IP_Blocklist_Fetcher {
 				return self::parse_range_list( $body );
 			case 'cidr_list':
 				return self::parse_cidr_list( $body );
+			case 'ip_count_list':
+				return self::parse_ip_count_list( $body );
 			default:
 				return array();
 		}
@@ -160,6 +184,30 @@ class Thessley_IP_Blocklist_Fetcher {
 				continue;
 			}
 			$long = ip2long( $line );
+			if ( false !== $long ) {
+				$ranges[] = array( $long, $long );
+			}
+		}
+
+		return $ranges;
+	}
+
+	/** "ip<TAB or spaces>count" per line (IPsum format); keeps count >= IPSUM_MIN_COUNT. */
+	private static function parse_ip_count_list( $body ) {
+		$ranges = array();
+
+		foreach ( preg_split( '/\r\n|\r|\n/', $body ) as $line ) {
+			$line = trim( $line );
+			if ( '' === $line || '#' === $line[0] ) {
+				continue;
+			}
+
+			$fields = preg_split( '/\s+/', $line );
+			if ( count( $fields ) < 2 || (int) $fields[1] < self::IPSUM_MIN_COUNT ) {
+				continue;
+			}
+
+			$long = ip2long( $fields[0] );
 			if ( false !== $long ) {
 				$ranges[] = array( $long, $long );
 			}

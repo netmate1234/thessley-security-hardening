@@ -4,7 +4,7 @@ Tags: security, firewall, malware, geo-blocking, brute-force
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.22
+Stable tag: 1.0.23
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -100,7 +100,9 @@ Plain-text lists of malicious IP addresses and ranges. The plugin downloads the 
 * **CINS Army list** — server `cinsscore.com` (`https://cinsscore.com/list/ci-badguys.txt`), operated by Sentinel IPS / Nomic Networks. Terms: https://sentinelips.com/terms — Privacy: https://sentinelips.com/privacy
 * **SANS DShield block list** — server `feeds.dshield.org` (`https://feeds.dshield.org/block.txt`), operated by the SANS Internet Storm Center. About: https://www.dshield.org/about.html — Privacy: https://www.dshield.org/privacy.html
 * **Spamhaus DROP** — server `www.spamhaus.org` (`https://www.spamhaus.org/drop/drop.txt`). Fair Use Policy: https://www.spamhaus.org/blocklists/drop-fair-use-policy/ — Terms: https://www.spamhaus.org/terms-conditions/ — Privacy: https://www.spamhaus.org/privacy-notice/
-* **FireHOL blocklist-ipsets (levels 1 and 2) and the ET Tor exit-node list** — server `raw.githubusercontent.com` (path `/firehol/blocklist-ipsets/master/`, three files). These are the FireHOL project's own published data lists, distributed from GitHub. Each is a plain-text list of IP addresses and CIDR ranges: no scripts, stylesheets, images or other code. They are downloaded server-side, parsed as text into a local range table, and never executed or loaded by a visitor's browser. GitHub Terms: https://docs.github.com/en/site-policy/github-terms/github-terms-of-service — Privacy: https://docs.github.com/en/site-policy/privacy-policies/github-privacy-statement
+* **FireHOL blocklist-ipsets (levels 1 and 2, the ET Tor exit-node list, and the webserver-attacker list)** — server `raw.githubusercontent.com` (path `/firehol/blocklist-ipsets/master/`, four files). These are the FireHOL project's own published data lists, distributed from GitHub. Each is a plain-text list of IP addresses and CIDR ranges: no scripts, stylesheets, images or other code. They are downloaded server-side, parsed as text into a local range table, and never executed or loaded by a visitor's browser. GitHub Terms: https://docs.github.com/en/site-policy/github-terms/github-terms-of-service — Privacy: https://docs.github.com/en/site-policy/privacy-policies/github-privacy-statement
+* **IPsum** — server `raw.githubusercontent.com` (`https://raw.githubusercontent.com/stamparm/ipsum/master/ipsum.txt`), a public-domain (Unlicense) aggregation of over 30 public blocklists maintained by stamparm. Each line is an IP address and a count of how many source lists flagged it; this plugin only keeps addresses with a count of 3 or more, to favor precision over the raw list's size. GitHub Terms/Privacy as above.
+* **ReportedIP CMS-login list** — server `raw.githubusercontent.com` (`https://raw.githubusercontent.com/reportedip/reportedip-blacklist/main/lists/cms-login.txt`), licensed CC BY 4.0 by ReportedIP (Patrick Schlesinger). A plain-text list of IPs its own community-reporting service has seen attacking WordPress, Drupal and other CMS login pages. Terms: https://reportedip.com/nutzungsbedingungen/ — Privacy: https://reportedip.com/datenschutzerklaerung/
 
 = unwantedip.eagleeye-intelligence.com (IP Sharing module and IP Blocklist feed) =
 
@@ -152,6 +154,9 @@ Opt-in. Sends a message to a Telegram chat you control when a security event exc
 Opt-in. Uses this site's own mail system, not a third-party service, so nothing is sent to any server listed here.
 
 == Changelog ==
+
+= 1.0.23 =
+* IP Blocklist: added three reputation feeds — IPsum (aggregates 30+ public blocklists, kept at count >= 3 for precision), FireHOL's webserver-attacker list, and ReportedIP's CMS-login list (WordPress/Drupal/CMS backend-login attackers). All opt-in, off by default, same as every other source.
 
 = 1.0.22 =
 * Hardening: fixed the web-root protection's archive/backup/log rules so a bundled plugin's own .htaccess under wp-content/ (WP Fastest Cache, Converter for Media and similar, which turn RewriteEngine back on with RewriteOptions Inherit) can no longer strip the path prefix a rule was anchored to and silently defeat it. Confirmed live: a 21MB theme .zip left in wp-content/themes stayed downloadable through the guard on a real site until this fix. Rules now test the full request path instead of a per-directory-relative one.
