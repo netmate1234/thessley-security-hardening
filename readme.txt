@@ -4,7 +4,7 @@ Tags: security, firewall, malware, geo-blocking, brute-force
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.20
+Stable tag: 1.0.21
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -152,6 +152,9 @@ Opt-in. Sends a message to a Telegram chat you control when a security event exc
 Opt-in. Uses this site's own mail system, not a third-party service, so nothing is sent to any server listed here.
 
 == Changelog ==
+
+= 1.0.21 =
+* unwantedip reporting: the per-IP one-report-per-hour cooldown was keyed only on the IP, so an IP's first blocked detection silenced every other kind of detection from that same IP for the rest of the hour. Now keyed on IP + module + event, so a genuinely new alert type on an already-seen IP is still reported.
 
 = 1.0.20 =
 * Query Guard: new signatures for credential and dot-folder probes (cloud CLIs, SSH keys, AI-tool config folders), root-level secret/project files, framework debug endpoints, webshell filenames, any `/.git` path, `/wp-login.php/<path>` recon, NUL-byte paths, `.env` with several suffixes and the wp2shell `_u=` marker, plus an explicit list of self-identifying scanner User-Agents. Sweeps are now stopped at their first request instead of after a few dozen.

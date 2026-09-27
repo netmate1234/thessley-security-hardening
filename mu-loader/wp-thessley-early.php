@@ -488,11 +488,15 @@ if ( ! function_exists( 'thessley_maybe_unwantedip_report' ) ) {
 			return;
 		}
 
-		// A sustained flood from one IP would otherwise file the same
-		// report dozens of times a minute — one report per IP per hour is
-		// plenty for a reputation tracker; the local Event Log already has
-		// the full detail for this install's own records.
-		$lock_key = 'thessley_uip_lock_' . md5( $ip );
+		// A sustained flood from one IP would otherwise file the same report
+		// dozens of times a minute — one report per (IP, module, event) per
+		// hour is plenty for a reputation tracker; the local Event Log
+		// already has the full detail for this install's own records.
+		// Keyed on module+event, not just the IP: an IP's first block used
+		// to lock out every OTHER kind of detection from that IP for the
+		// same hour, so a genuinely new alert type on an already-seen IP
+		// was silently dropped instead of reported.
+		$lock_key = 'thessley_uip_lock_' . md5( $ip . '|' . $module . '|' . $event );
 		if ( false !== get_transient( $lock_key ) ) {
 			return;
 		}
