@@ -27,12 +27,12 @@ require_once __DIR__ . '/class-crypto.php';
  * The Android app itself is a separate codebase — this module is the
  * server half of the protocol only.
  *
+ * QR rendering uses davidshimjs/qrcodejs (MIT), bundled locally at
+ * assets/vendor/qrcode.min.js rather than loaded from a CDN — this
+ * plugin ships through the WordPress.org directory, which expects
+ * bundled assets, not remote script dependencies.
+ *
  * NOT YET DONE in this scaffold (follow-up work, not covered here):
- *  - Actual QR *rendering* on wp-login.php/the profile page. The login
- *    URL/request_id this module hands back is everything a QR needs to
- *    encode, but drawing it client-side needs a bundled QR JS library
- *    (nothing vendored yet) — until then, start_login_markup() below
- *    renders the raw URL as a visible link instead of a QR image.
  *  - Styling/placement on wp-login.php beyond a bare functional block.
  */
 class Thessley_Module_Passkey_Login {
@@ -79,6 +79,7 @@ class Thessley_Module_Passkey_Login {
 
 		add_action( 'show_user_profile', array( __CLASS__, 'render_profile_section' ) );
 		add_action( 'edit_user_profile', array( __CLASS__, 'render_profile_section' ) );
+		add_action( 'admin_enqueue_scripts', array( __CLASS__, 'profile_page_assets' ) );
 
 		return __CLASS__;
 	}
@@ -477,8 +478,18 @@ class Thessley_Module_Passkey_Login {
 
 	// --- wp-login.php integration ----------------------------------------
 
+	/** render_profile_section()'s inline <script> (below) relies on the global QRCode this defines — profile.php/user-edit.php only, not every admin page. */
+	public static function profile_page_assets( $hook ) {
+		if ( ! self::enabled() || ! in_array( $hook, array( 'profile.php', 'user-edit.php' ), true ) ) {
+			return;
+		}
+		wp_enqueue_script( 'thessley-qrcodejs', THESSLEY_PLUGIN_URL . 'assets/vendor/qrcode.min.js', array(), THESSLEY_VERSION, true );
+	}
+
 	public static function login_page_assets() {
-		wp_register_script( 'thessley-passkey-login', false, array(), THESSLEY_VERSION, true );
+		wp_enqueue_script( 'thessley-qrcodejs', THESSLEY_PLUGIN_URL . 'assets/vendor/qrcode.min.js', array(), THESSLEY_VERSION, true );
+
+		wp_register_script( 'thessley-passkey-login', false, array( 'thessley-qrcodejs' ), THESSLEY_VERSION, true );
 		wp_enqueue_script( 'thessley-passkey-login' );
 
 		$rest_base = esc_url_raw( rest_url( 'thessley/v1/passkey/login' ) );
@@ -489,10 +500,9 @@ class Thessley_Module_Passkey_Login {
 			"  var box = document.getElementById('thessley-passkey-box');\n" .
 			"  if (!box) return;\n" .
 			"  fetch('{$rest_base}/start', {method:'POST'}).then(function(r){return r.json();}).then(function(data){\n" .
+			"    new QRCode(document.getElementById('thessley-passkey-qr'), {text: data.app_link, width: 180, height: 180});\n" .
 			"    var linkEl = document.getElementById('thessley-passkey-link');\n" .
 			"    if (linkEl) { linkEl.href = data.app_link; }\n" .
-			"    var urlEl = document.getElementById('thessley-passkey-url');\n" .
-			"    if (urlEl) { urlEl.textContent = data.app_link; }\n" .
 			"    var poll = setInterval(function(){\n" .
 			"      fetch('{$rest_base}/' + data.request_id + '/status').then(function(r){return r.json();}).then(function(s){\n" .
 			"        if (s.status === 'approved') { clearInterval(poll); window.location.href = s.redirect_to; }\n" .
@@ -508,10 +518,8 @@ class Thessley_Module_Passkey_Login {
 		?>
 		<div id="thessley-passkey-box" style="margin:16px 0;padding:12px;border:1px solid #dcdcde;border-radius:4px;text-align:center">
 			<p><strong>Log in with the <?php echo esc_html( get_bloginfo( 'name' ) ); ?> app</strong></p>
-			<p class="description">
-				On another device: open the <?php echo esc_html( get_bloginfo( 'name' ) ); ?> app and scan this as a QR code (QR image rendering not yet wired up — see module.php docblock).<br>
-				<code id="thessley-passkey-url">loading…</code>
-			</p>
+			<p class="description">On another device: open the app and scan this code.</p>
+			<div id="thessley-passkey-qr" style="display:inline-block;line-height:0"></div>
 			<p><a id="thessley-passkey-link" href="#">Open on this device</a></p>
 		</div>
 		<?php
@@ -545,7 +553,7 @@ class Thessley_Module_Passkey_Login {
 
 		Thessley_UI::notice(
 			'info',
-			'This is a scaffold: the server-side protocol (REST endpoints, device storage, signature verification) is complete, but the companion Android app is a separate project, and QR *rendering* on this page and on wp-login.php still needs a bundled QR library. See this module\'s docblock.',
+			'The server-side protocol, REST endpoints, device storage, signature verification, and QR rendering are all in place. The companion Android app is a separate project — see this module\'s docblock.',
 			true
 		);
 
@@ -630,15 +638,17 @@ class Thessley_Module_Passkey_Login {
 					<?php if ( get_current_user_id() === (int) $user->ID ) : ?>
 						<div id="thessley-pk-enroll-box" style="margin-top:14px">
 							<button type="button" class="button" id="thessley-pk-enroll-start">Add a device</button>
+							<div id="thessley-pk-enroll-qr" style="display:none;margin-top:10px;line-height:0"></div>
 							<p id="thessley-pk-enroll-status" class="description" style="margin-top:8px"></p>
 						</div>
 						<p class="description" style="margin-top:4px">
-							QR image rendering isn't wired up yet in this scaffold — open the link on the same device you're enrolling, or copy it to the device's browser.
+							Scan the code with the device you're enrolling, or open the link on that same device.
 						</p>
 						<script>
 						(function(){
 							var btn = document.getElementById('thessley-pk-enroll-start');
 							var status = document.getElementById('thessley-pk-enroll-status');
+							var qrBox = document.getElementById('thessley-pk-enroll-qr');
 							var restBase = <?php echo wp_json_encode( esc_url_raw( rest_url( 'thessley/v1/passkey/enroll' ) ) ); ?>;
 							var nonce = <?php echo wp_json_encode( wp_create_nonce( 'wp_rest' ) ); ?>;
 
@@ -650,7 +660,10 @@ class Thessley_Module_Passkey_Login {
 									method: 'POST',
 									headers: { 'X-WP-Nonce': nonce },
 								}).then(function (r) { return r.json(); }).then(function (data) {
-									status.innerHTML = 'Open on the device you want to enroll: <a href="' + data.app_link + '">' + data.app_link + '</a>';
+									qrBox.style.display = 'block';
+									qrBox.innerHTML = '';
+									new QRCode(qrBox, { text: data.app_link, width: 160, height: 160 });
+									status.innerHTML = 'Or open on the device you want to enroll: <a href="' + data.app_link + '">' + data.app_link + '</a>';
 
 									var poll = setInterval(function () {
 										fetch(restBase + '/' + data.request_id + '/status', {

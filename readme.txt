@@ -53,6 +53,7 @@ Thessley Security Hardening is a modular security plugin. Each feature is a self
 = Bundled third-party assets =
 
 * World map outline used by the Event Map module: [flekschas/simple-world-map](https://github.com/flekschas/simple-world-map), CC BY-SA 3.0.
+* QR code rendering used by the Passkey Login module: [davidshimjs/qrcodejs](https://github.com/davidshimjs/qrcodejs), MIT License.
 
 == Installation ==
 
