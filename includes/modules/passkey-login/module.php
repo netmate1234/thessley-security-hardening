@@ -105,9 +105,19 @@ class Thessley_Module_Passkey_Login {
 	 * is forced to passkey-only, regardless of their own profile choice
 	 * — the site setting can tighten what a user picked, never loosen it.
 	 */
+	/**
+	 * No longer a site-wide setting — a separate admin-set floor on top
+	 * of each account's own profile-page choice was two controls that
+	 * could silently drift out of sync with each other (the direct cause
+	 * of nearly every "the login page shows the wrong thing" report while
+	 * building this). The login page now always shows the one
+	 * unconditional view (password form + QR together); each account's
+	 * own choice on their profile page is still fully enforced after
+	 * password submission via effective_mode_for_user() below, unchanged
+	 * — only the page's *display*, not the enforcement, stopped varying.
+	 */
 	public static function mode() {
-		$mode = get_option( 'thessley_passkey_mode', 'optional' );
-		return in_array( $mode, array( 'optional', '2fa', 'required' ), true ) ? $mode : 'optional';
+		return 'optional';
 	}
 
 	private static function mode_rank( $mode ) {
@@ -728,11 +738,7 @@ class Thessley_Module_Passkey_Login {
 			wp_die( 'Forbidden', 403 );
 		}
 
-		$posted = (string) ( $_POST['mode'] ?? '' );
-		$mode   = in_array( $posted, array( '2fa', 'required' ), true ) ? $posted : 'optional';
-
 		update_option( 'thessley_passkey_enabled', isset( $_POST['enabled'] ) );
-		update_option( 'thessley_passkey_mode', $mode );
 
 		wp_safe_redirect( add_query_arg( 'saved', '1', wp_get_referer() ) );
 		exit;
@@ -740,7 +746,6 @@ class Thessley_Module_Passkey_Login {
 
 	public static function render_page() {
 		$enabled = self::enabled();
-		$mode    = self::mode();
 
 		Thessley_UI::open( 'passkey-login' );
 
@@ -770,19 +775,9 @@ class Thessley_Module_Passkey_Login {
 					<?php
 				}
 			);
-
-			Thessley_UI::row(
-				'Login method',
-				function () use ( $mode ) {
-					?>
-					<label><input type="radio" name="mode" value="optional" <?php checked( 'optional', $mode ); ?>> Password — the login page shows the normal password form only</label><br>
-					<label><input type="radio" name="mode" value="2fa" <?php checked( '2fa', $mode ); ?>> Password, then app — password first, the app confirms it afterward</label><br>
-					<label><input type="radio" name="mode" value="required" <?php checked( 'required', $mode ); ?>> App only — the login page shows a QR code only, no password form</label>
-					<?php
-				},
-				'A user with no device enrolled always falls back to plain password, regardless of this setting — there is nothing to confirm with yet. A user can also set a stricter method than this for just their own account on their profile page, but never a looser one.'
-			);
-
+			?>
+			<p class="description">Each account's login method (password, password + app, or app only) is set on that user's own profile page.</p>
+			<?php
 			submit_button( 'Save settings' );
 			?>
 		</form>
