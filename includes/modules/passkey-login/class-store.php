@@ -10,7 +10,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class Thessley_Passkey_Store {
 
-	const DB_VERSION = 1;
+	const DB_VERSION = 2; // v2: thessley_passkeys.attestation_level
 
 	public static function passkeys_table() {
 		global $wpdb;
@@ -38,6 +38,7 @@ class Thessley_Passkey_Store {
 				algorithm     varchar(16) NOT NULL DEFAULT 'ES256',
 				counter       bigint(20) unsigned NOT NULL DEFAULT 0,
 				label         varchar(100) NOT NULL DEFAULT '',
+				attestation_level varchar(16) NULL,
 				created_at    datetime NOT NULL,
 				last_used_at  datetime NULL,
 				revoked_at    datetime NULL,
@@ -202,6 +203,19 @@ class Thessley_Passkey_Store {
 		return $credential_id;
 	}
 
+	/** $level is one of 'software'|'tee'|'strongbox'|null (null = device submitted no attestation chain, or verification itself failed to even parse it — distinct from a confirmed 'software' result). */
+	public static function set_attestation_level( $row_id, $level ) {
+		global $wpdb;
+
+		$wpdb->update(
+			self::passkeys_table(),
+			array( 'attestation_level' => $level ),
+			array( 'id' => $row_id ),
+			array( '%s' ),
+			array( '%d' )
+		);
+	}
+
 	public static function get_passkey_by_credential( $credential_id ) {
 		global $wpdb;
 
@@ -232,7 +246,7 @@ class Thessley_Passkey_Store {
 		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name, not user input.
 		return $wpdb->get_results(
 			$wpdb->prepare(
-				'SELECT id, credential_id, label, created_at, last_used_at, revoked_at FROM ' . self::passkeys_table() . ' WHERE user_id = %d ORDER BY created_at DESC',
+				'SELECT id, credential_id, label, attestation_level, created_at, last_used_at, revoked_at FROM ' . self::passkeys_table() . ' WHERE user_id = %d ORDER BY created_at DESC',
 				$user_id
 			)
 		);

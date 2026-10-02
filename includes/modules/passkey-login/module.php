@@ -5,6 +5,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 require_once __DIR__ . '/class-store.php';
 require_once __DIR__ . '/class-crypto.php';
+require_once __DIR__ . '/class-attestation.php';
 
 /**
  * Passwordless login via a companion Android app, BankID-style:
@@ -543,12 +544,13 @@ class Thessley_Module_Passkey_Login {
 			return new WP_Error( 'thessley_rate_limited', 'Too many requests.', array( 'status' => 429 ) );
 		}
 
-		$id         = $req->get_param( 'id' );
-		$public_key = (string) $req->get_param( 'public_key' );
-		$algorithm  = (string) $req->get_param( 'algorithm' );
-		$label      = (string) $req->get_param( 'label' );
-		$timestamp  = (int) $req->get_param( 'timestamp' );
-		$proof      = (string) $req->get_param( 'proof_signature' );
+		$id                = $req->get_param( 'id' );
+		$public_key        = (string) $req->get_param( 'public_key' );
+		$algorithm         = (string) $req->get_param( 'algorithm' );
+		$label             = (string) $req->get_param( 'label' );
+		$timestamp         = (int) $req->get_param( 'timestamp' );
+		$proof             = (string) $req->get_param( 'proof_signature' );
+		$attestation_chain = (array) $req->get_param( 'attestation_chain' );
 
 		$request = Thessley_Passkey_Store::get_request( $id );
 		if ( ! $request || 'enroll' !== $request->type || 'pending' !== $request->status
@@ -584,6 +586,8 @@ class Thessley_Module_Passkey_Login {
 		}
 
 		thessley_log_event( 'passkey-login', 'enroll_approved', 'noted', 'user #' . (int) $request->requester_user_id . ' added device "' . sanitize_text_field( $label ) . '"' );
+		self::notify_device_enrolled( (int) $request->requester_user_id, $label );
+		self::record_attestation( $row_id, $attestation_chain, $request->nonce );
 
 		// The app needs this for every future login/respond call — it has
 		// no other way to learn the server-assigned credential_id, since
@@ -607,6 +611,56 @@ class Thessley_Module_Passkey_Login {
 
 	private static function passkey_row_id( $passkey ) {
 		return (int) $passkey->id;
+	}
+
+	/**
+	 * The one tripwire against a hijacked WP session being used to enroll
+	 * a persistent backdoor device (that session only needs to survive
+	 * long enough to add one; the device then keeps working even after a
+	 * password change). An attacker with an active session can't stop
+	 * this email going to the real account owner's address, which is a
+	 * meaningfully different capability than the session itself grants.
+	 */
+	private static function notify_device_enrolled( $user_id, $label ) {
+		$user = get_userdata( $user_id );
+		if ( ! $user || ! $user->user_email ) {
+			return;
+		}
+
+		wp_mail(
+			$user->user_email,
+			sprintf( '[%s] New passkey device added to your account', get_bloginfo( 'name' ) ),
+			sprintf(
+				"A new device (\"%s\") was just added to your account (%s) on %s, from IP %s.\n\n" .
+				"If this was you, no action is needed.\n\n" .
+				"If this wasn't you, log in and remove it immediately from your profile page's \"Passkey devices\" section, then change your password.",
+				sanitize_text_field( $label ),
+				$user->user_login,
+				home_url(),
+				thessley_client_ip()
+			)
+		);
+	}
+
+	/**
+	 * Verifies the device's Keystore attestation chain and records the
+	 * result — but, per Thessley_Passkey_Attestation's own docblock, never
+	 * rejects enrollment on it. This is purely visibility for now: the
+	 * profile page shows whatever level comes back, and a confirmed
+	 * software-only (non-hardware-backed) result is worth knowing about
+	 * even before this becomes a hard gate.
+	 */
+	private static function record_attestation( $row_id, $attestation_chain, $nonce ) {
+		$result = Thessley_Passkey_Attestation::verify( $attestation_chain, $nonce );
+
+		if ( ! $result['ok'] ) {
+			Thessley_Passkey_Store::set_attestation_level( $row_id, null );
+			thessley_log_event( 'passkey-login', 'attestation_unverified', 'noted', 'device #' . $row_id . ': ' . $result['reason'] );
+			return;
+		}
+
+		Thessley_Passkey_Store::set_attestation_level( $row_id, $result['security_level_name'] );
+		thessley_log_event( 'passkey-login', 'attestation_verified', 'noted', 'device #' . $row_id . ': ' . $result['security_level_name'] );
 	}
 
 	// --- wp-login.php integration ----------------------------------------
@@ -769,14 +823,22 @@ class Thessley_Module_Passkey_Login {
 						<p class="description">No devices enrolled yet.</p>
 					<?php else : ?>
 						<table class="widefat" style="max-width:600px">
-							<thead><tr><th>Label</th><th>Added</th><th>Last used</th><th>Status</th><th></th></tr></thead>
+							<thead><tr><th>Label</th><th>Added</th><th>Last used</th><th>Status</th><th>Key</th><th></th></tr></thead>
 							<tbody>
+							<?php
+							$attestation_labels = array(
+								'strongbox' => 'StrongBox hardware',
+								'tee'       => 'TEE hardware',
+								'software'  => 'Software (not hardware-backed)',
+							);
+							?>
 							<?php foreach ( $devices as $d ) : ?>
 								<tr>
 									<td><?php echo esc_html( $d->label ?: 'Unnamed device' ); ?></td>
 									<td><?php echo esc_html( mysql2date( 'M j, Y', $d->created_at ) ); ?></td>
 									<td><?php echo $d->last_used_at ? esc_html( mysql2date( 'M j, Y H:i', $d->last_used_at ) ) : '—'; ?></td>
 									<td><?php echo $d->revoked_at ? 'Revoked' : 'Active'; ?></td>
+									<td><?php echo esc_html( $attestation_labels[ $d->attestation_level ?? '' ] ?? 'Unverified' ); ?></td>
 									<td>
 										<?php if ( ! $d->revoked_at && ( get_current_user_id() === (int) $user->ID || current_user_can( 'manage_options' ) ) ) : ?>
 											<?php // No <form> here — see the Login method script's comment on why nested forms inside profile.php/user-edit.php break WordPress core's own nonce check. ?>

@@ -217,6 +217,8 @@ if ( ! function_exists( 'thessley_severity_map' ) ) {
 			'passkey-login:device_revoked'          => 4,
 			'passkey-login:password_login_blocked'  => 4,
 			'passkey-login:password_step_ok'        => 2,
+			'passkey-login:attestation_verified'    => 2,
+			'passkey-login:attestation_unverified'  => 5,
 			'auto-update:updated'                   => 2,
 			'file-integrity:baseline_taken'         => 1,
 			'user-watchdog:snapshot_taken'          => 1,
