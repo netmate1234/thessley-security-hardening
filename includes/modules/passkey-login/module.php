@@ -84,7 +84,7 @@ class Thessley_Module_Passkey_Login {
 
 		if ( self::enabled() ) {
 			add_action( 'login_enqueue_scripts', array( __CLASS__, 'login_page_assets' ) );
-			add_action( 'login_form', array( __CLASS__, 'login_form_markup' ) );
+			add_action( 'login_footer', array( __CLASS__, 'login_form_markup' ) );
 		}
 
 		add_action( 'show_user_profile', array( __CLASS__, 'render_profile_section' ) );
@@ -608,27 +608,46 @@ class Thessley_Module_Passkey_Login {
 		wp_add_inline_script(
 			'thessley-passkey-login',
 			"(function(){\n" .
+			"  var toggle = document.getElementById('thessley-passkey-toggle');\n" .
 			"  var box = document.getElementById('thessley-passkey-box');\n" .
-			"  if (!box) return;\n" .
-			"  fetch('{$rest_base}/start', {method:'POST'}).then(function(r){return r.json();}).then(function(data){\n" .
-			"    new QRCode(document.getElementById('thessley-passkey-qr'), {text: data.app_link, width: 180, height: 180});\n" .
-			"    var linkEl = document.getElementById('thessley-passkey-link');\n" .
-			"    if (linkEl) { linkEl.href = data.app_link; }\n" .
-			"    var poll = setInterval(function(){\n" .
-			"      fetch('{$rest_base}/' + data.request_id + '/status').then(function(r){return r.json();}).then(function(s){\n" .
-			"        if (s.status === 'approved') { clearInterval(poll); window.location.href = s.redirect_to; }\n" .
-			"        if (s.status === 'denied' || s.status === 'expired') { clearInterval(poll); box.textContent = 'Request ' + s.status + ' — refresh to try again.'; }\n" .
-			"      });\n" .
-			"    }, 1500);\n" .
+			"  if (!toggle || !box) return;\n" .
+			"  var started = false;\n" .
+			"  toggle.addEventListener('click', function (e) {\n" .
+			"    e.preventDefault();\n" .
+			"    box.style.display = (box.style.display === 'none' || !box.style.display) ? 'block' : 'none';\n" .
+			"    if (started || box.style.display === 'none') return;\n" .
+			"    started = true;\n" .
+			"    fetch('{$rest_base}/start', {method:'POST'}).then(function(r){return r.json();}).then(function(data){\n" .
+			"      new QRCode(document.getElementById('thessley-passkey-qr'), {text: data.app_link, width: 180, height: 180});\n" .
+			"      var linkEl = document.getElementById('thessley-passkey-link');\n" .
+			"      if (linkEl) { linkEl.href = data.app_link; }\n" .
+			"      var poll = setInterval(function(){\n" .
+			"        fetch('{$rest_base}/' + data.request_id + '/status').then(function(r){return r.json();}).then(function(s){\n" .
+			"          if (s.status === 'approved') { clearInterval(poll); window.location.href = s.redirect_to; }\n" .
+			"          if (s.status === 'denied' || s.status === 'expired') { clearInterval(poll); box.textContent = 'Request ' + s.status + ' — refresh to try again.'; }\n" .
+			"        });\n" .
+			"      }, 1500);\n" .
+			"    });\n" .
 			"  });\n" .
 			'})();'
 		);
 	}
 
+	/**
+	 * Hooked to 'login_footer', not 'login_form' — 'login_form' fires
+	 * *inside* the password <form>, which both looks wrong (the app box
+	 * competing with the password fields for attention) and risks the
+	 * same nested-element problems invalid markup causes elsewhere in
+	 * this module. Password login stays the default, primary thing shown;
+	 * the app is a toggled-open secondary option, and the QR isn't even
+	 * requested from the server until that toggle is actually opened.
+	 */
 	public static function login_form_markup() {
 		?>
-		<div id="thessley-passkey-box" style="margin:16px 0;padding:12px;border:1px solid #dcdcde;border-radius:4px;text-align:center">
-			<p><strong>Log in with the <?php echo esc_html( get_bloginfo( 'name' ) ); ?> app</strong></p>
+		<p style="text-align:center;margin-top:16px">
+			<a href="#" id="thessley-passkey-toggle">Log in with the <?php echo esc_html( get_bloginfo( 'name' ) ); ?> app instead</a>
+		</p>
+		<div id="thessley-passkey-box" style="display:none;margin:12px 0;padding:12px;border:1px solid #dcdcde;border-radius:4px;text-align:center">
 			<p class="description">On another device: open the app and scan this code.</p>
 			<div id="thessley-passkey-qr" style="display:inline-block;line-height:0"></div>
 			<p><a id="thessley-passkey-link" href="#">Open on this device</a></p>
@@ -736,15 +755,54 @@ class Thessley_Module_Passkey_Login {
 					<?php elseif ( 'required' === self::mode() ) : ?>
 						<p class="description">Your site administrator requires the app for every account with a device enrolled — password login is disabled for you.</p>
 					<?php elseif ( $can_edit ) : ?>
-						<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-							<?php wp_nonce_field( 'thessley_pk_save_user_mode_' . $user->ID ); ?>
-							<input type="hidden" name="action" value="thessley_pk_save_user_mode">
-							<input type="hidden" name="user_id" value="<?php echo esc_attr( $user->ID ); ?>">
+						<div id="thessley-pk-mode-box">
 							<?php foreach ( $labels as $value => $label ) : ?>
-								<label><input type="radio" name="user_mode" value="<?php echo esc_attr( $value ); ?>" <?php checked( $value, $preferred ); ?>> <?php echo esc_html( $label ); ?></label><br>
+								<label><input type="radio" name="thessley_user_mode" value="<?php echo esc_attr( $value ); ?>" <?php checked( $value, $preferred ); ?>> <?php echo esc_html( $label ); ?></label><br>
 							<?php endforeach; ?>
-							<?php submit_button( 'Save', 'secondary', 'submit', false, array( 'style' => 'margin-top:8px' ) ); ?>
-						</form>
+							<?php submit_button( 'Save', 'secondary', 'thessley-pk-mode-save', false, array( 'type' => 'button', 'style' => 'margin-top:8px' ) ); ?>
+							<p id="thessley-pk-mode-status" class="description"></p>
+						</div>
+						<script>
+						(function () {
+							// A plain <form> here would nest inside WordPress core's
+							// own #your-profile form (profile.php/user-edit.php wrap
+							// show_user_profile/edit_user_profile entirely inside it) —
+							// HTML doesn't allow nested forms, so the browser collapses
+							// them into one, and both forms' same-named _wpnonce fields
+							// collide: whichever value survives gets checked against
+							// the WRONG action, failing core's own profile-save nonce
+							// check with "Link expired". Submitting via fetch() instead
+							// avoids creating a second <form> at all.
+							var box = document.getElementById('thessley-pk-mode-box');
+							var btn = document.getElementById('thessley-pk-mode-save');
+							var status = document.getElementById('thessley-pk-mode-status');
+
+							btn.addEventListener('click', function () {
+								var mode = box.querySelector('input[name="thessley_user_mode"]:checked').value;
+								btn.disabled = true;
+								status.textContent = 'Saving…';
+
+								var body = new URLSearchParams({
+									action: 'thessley_pk_save_user_mode',
+									user_id: <?php echo (int) $user->ID; ?>,
+									user_mode: mode,
+									_wpnonce: <?php echo wp_json_encode( wp_create_nonce( 'thessley_pk_save_user_mode_' . $user->ID ) ); ?>,
+								});
+
+								fetch(<?php echo wp_json_encode( esc_url_raw( admin_url( 'admin-post.php' ) ) ); ?>, {
+									method: 'POST',
+									headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+									body: body,
+								}).then(function () {
+									status.textContent = 'Saved.';
+									btn.disabled = false;
+								}).catch(function () {
+									status.textContent = 'Something went wrong — try again.';
+									btn.disabled = false;
+								});
+							});
+						})();
+						</script>
 					<?php else : ?>
 						<p class="description"><?php echo esc_html( $labels[ $preferred ] ); ?></p>
 					<?php endif; ?>
@@ -767,19 +825,38 @@ class Thessley_Module_Passkey_Login {
 									<td><?php echo $d->revoked_at ? 'Revoked' : 'Active'; ?></td>
 									<td>
 										<?php if ( ! $d->revoked_at && ( get_current_user_id() === (int) $user->ID || current_user_can( 'manage_options' ) ) ) : ?>
-											<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-												<?php wp_nonce_field( 'thessley_pk_revoke_' . $d->id ); ?>
-												<input type="hidden" name="action" value="thessley_pk_revoke">
-												<input type="hidden" name="id" value="<?php echo esc_attr( $d->id ); ?>">
-												<input type="hidden" name="user_id" value="<?php echo esc_attr( $user->ID ); ?>">
-												<?php submit_button( 'Revoke', 'small', 'submit', false ); ?>
-											</form>
+											<?php // No <form> here — see the Login method script's comment on why nested forms inside profile.php/user-edit.php break WordPress core's own nonce check. ?>
+											<button type="button" class="button button-small thessley-pk-revoke-btn"
+												data-id="<?php echo esc_attr( $d->id ); ?>"
+												data-user-id="<?php echo esc_attr( $user->ID ); ?>"
+												data-nonce="<?php echo esc_attr( wp_create_nonce( 'thessley_pk_revoke_' . $d->id ) ); ?>">Revoke</button>
 										<?php endif; ?>
 									</td>
 								</tr>
 							<?php endforeach; ?>
 							</tbody>
 						</table>
+						<script>
+						(function () {
+							document.querySelectorAll('.thessley-pk-revoke-btn').forEach(function (btn) {
+								btn.addEventListener('click', function () {
+									btn.disabled = true;
+									var body = new URLSearchParams({
+										action: 'thessley_pk_revoke',
+										id: btn.dataset.id,
+										user_id: btn.dataset.userId,
+										_wpnonce: btn.dataset.nonce,
+									});
+									fetch(<?php echo wp_json_encode( esc_url_raw( admin_url( 'admin-post.php' ) ) ); ?>, {
+										method: 'POST',
+										headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+										body: body,
+									}).then(function () { window.location.reload(); })
+									  .catch(function () { btn.disabled = false; });
+								});
+							});
+						})();
+						</script>
 					<?php endif; ?>
 
 					<?php if ( get_current_user_id() === (int) $user->ID ) : ?>
