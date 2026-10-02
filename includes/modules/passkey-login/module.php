@@ -118,21 +118,34 @@ class Thessley_Module_Passkey_Login {
 		return false;
 	}
 
-	/** The user's own preference, independent of whether the site floor currently forces it anyway. */
-	private static function user_prefers_app_only( $user_id ) {
-		return 'required' === get_user_meta( $user_id, 'thessley_passkey_user_mode', true );
+	/**
+	 * The user's own preference, independent of whether the site floor
+	 * currently forces something stricter anyway. One of:
+	 *   'optional' — password alone is enough
+	 *   '2fa'      — password, then an app approval, both required
+	 *   'required' — password login refused outright, app only
+	 */
+	public static function user_preferred_mode( $user_id ) {
+		$mode = get_user_meta( $user_id, 'thessley_passkey_user_mode', true );
+		return in_array( $mode, array( 'optional', '2fa', 'required' ), true ) ? $mode : 'optional';
 	}
 
 	/**
-	 * What actually applies to this user right now: the site floor can
-	 * only push this to 'required', never override a user's own choice
-	 * of 'required' down to 'optional'.
+	 * What actually applies to this user right now. Strictness order is
+	 * optional < 2fa < required; the site floor can only push a user's
+	 * choice up this scale, never pull it back down — a user who opted
+	 * into 2fa or required keeps that even if the site default is
+	 * 'optional', but a site set to 'required' overrides everyone
+	 * regardless of their personal pick.
 	 */
 	public static function effective_mode_for_user( $user_id ) {
 		if ( ! self::user_has_active_device( $user_id ) ) {
 			return 'optional'; // nothing to require yet, regardless of any setting
 		}
-		return ( 'required' === self::mode() || self::user_prefers_app_only( $user_id ) ) ? 'required' : 'optional';
+		if ( 'required' === self::mode() ) {
+			return 'required';
+		}
+		return self::user_preferred_mode( $user_id );
 	}
 
 	// --- Rewrite route: the human-facing fallback page -------------------
@@ -153,10 +166,10 @@ class Thessley_Module_Passkey_Login {
 	// somewhere coherent instead of a 404.
 
 	public static function add_rewrite_rule() {
-		add_rewrite_tag( '%thessley_auth_type%', '(login|enroll)' );
+		add_rewrite_tag( '%thessley_auth_type%', '(login|enroll|2fa)' );
 		add_rewrite_tag( '%thessley_auth_id%', '([^&/]+)' );
 		add_rewrite_rule(
-			'^thessley-auth/(login|enroll)/([^/]+)/?$',
+			'^thessley-auth/(login|enroll|2fa)/([^/]+)/?$',
 			'index.php?thessley_auth_type=$matches[1]&thessley_auth_id=$matches[2]',
 			'top'
 		);
@@ -220,6 +233,11 @@ class Thessley_Module_Passkey_Login {
 			exit;
 		}
 
+		if ( '2fa' === $type ) {
+			self::render_2fa_page( $request );
+			exit;
+		}
+
 		printf(
 			'<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>%1$s</title>' .
 			'<p>Open this on the device with the %2$s app installed to continue.</p>' .
@@ -229,6 +247,49 @@ class Thessley_Module_Passkey_Login {
 			esc_url( 'https://play.google.com/store/apps/details?id=' . self::app_package_id() )
 		);
 		exit;
+	}
+
+	/**
+	 * Unlike a plain login/enroll request — which shows its QR on the page
+	 * that started it (wp-login.php, profile.php) and only falls back to
+	 * this route if the app failed to intercept the link — a 2fa request
+	 * has nowhere else to be shown: the password form redirects here
+	 * directly, so this page has to be the real confirmation UI, not just
+	 * a fallback message.
+	 */
+	private static function render_2fa_page( $request ) {
+		$app_link  = self::app_link( '2fa', $request->request_id, $request->nonce );
+		$rest_base = esc_url_raw( rest_url( 'thessley/v1/passkey/login' ) );
+		$qr_src    = esc_url( THESSLEY_PLUGIN_URL . 'assets/vendor/qrcode.min.js' );
+		?>
+		<!doctype html>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width,initial-scale=1">
+		<title><?php echo esc_html( get_bloginfo( 'name' ) ); ?> — confirm login</title>
+		<div style="max-width:360px;margin:40px auto;padding:16px;font-family:sans-serif;text-align:center">
+			<h1 style="font-size:1.1em"><?php echo esc_html( get_bloginfo( 'name' ) ); ?></h1>
+			<p>Your password was correct. Confirm with the app to finish logging in.</p>
+			<div id="thessley-2fa-qr" style="display:inline-block;line-height:0"></div>
+			<p><a href="<?php echo esc_attr( $app_link ); ?>">Open on this device</a></p>
+			<p id="thessley-2fa-status" style="color:#666"></p>
+		</div>
+		<script src="<?php echo $qr_src; ?>"></script>
+		<script>
+		(function () {
+			new QRCode(document.getElementById('thessley-2fa-qr'), { text: <?php echo wp_json_encode( $app_link ); ?>, width: 200, height: 200 });
+
+			var statusEl = document.getElementById('thessley-2fa-status');
+			var poll = setInterval(function () {
+				fetch(<?php echo wp_json_encode( esc_url_raw( $rest_base . '/' . $request->request_id . '/status' ) ); ?>)
+					.then(function (r) { return r.json(); })
+					.then(function (s) {
+						if (s.status === 'approved') { clearInterval(poll); window.location.href = s.redirect_to; }
+						if (s.status === 'denied' || s.status === 'expired') { clearInterval(poll); statusEl.textContent = 'Request ' + s.status + ' — log in again to retry.'; }
+					});
+			}, 1500);
+		})();
+		</script>
+		<?php
 	}
 
 	// --- REST API --------------------------------------------------------
@@ -331,7 +392,7 @@ class Thessley_Module_Passkey_Login {
 		$id      = $req->get_param( 'id' );
 		$request = Thessley_Passkey_Store::get_request( $id );
 
-		if ( ! $request || 'login' !== $request->type ) {
+		if ( ! $request || ! in_array( $request->type, array( 'login', '2fa' ), true ) ) {
 			return rest_ensure_response( array( 'status' => 'expired' ) );
 		}
 		if ( strtotime( $request->expires_at . ' UTC' ) < time() && 'pending' === $request->status ) {
@@ -376,7 +437,7 @@ class Thessley_Module_Passkey_Login {
 		}
 
 		$request = Thessley_Passkey_Store::get_request( $id );
-		if ( ! $request || 'login' !== $request->type || 'pending' !== $request->status
+		if ( ! $request || ! in_array( $request->type, array( 'login', '2fa' ), true ) || 'pending' !== $request->status
 			|| strtotime( $request->expires_at . ' UTC' ) < time() ) {
 			return new WP_Error( 'thessley_expired', 'This request is no longer valid.', array( 'status' => 409 ) );
 		}
@@ -390,7 +451,16 @@ class Thessley_Module_Passkey_Login {
 			return new WP_Error( 'thessley_unknown_device', 'Unknown or revoked device.', array( 'status' => 401 ) );
 		}
 
-		$message = Thessley_Passkey_Crypto::canonical_string( 'login', $id, home_url(), $request->nonce, $timestamp, $action );
+		// A 2fa request already knows who's logging in (the password step
+		// identified them) — unlike a plain login request, where whichever
+		// device approves IS the identification. Only that same user's own
+		// device may resolve it.
+		if ( '2fa' === $request->type && (int) $request->requester_user_id !== (int) $passkey->user_id ) {
+			thessley_log_event( 'passkey-login', 'signature_invalid', 'blocked', 'credential ' . $cred_id . ' tried to confirm another user\'s 2fa request' );
+			return new WP_Error( 'thessley_wrong_account', 'This device belongs to a different account.', array( 'status' => 403 ) );
+		}
+
+		$message = Thessley_Passkey_Crypto::canonical_string( $request->type, $id, home_url(), $request->nonce, $timestamp, $action );
 
 		if ( ! Thessley_Passkey_Crypto::verify( $passkey->public_key, $message, $signature ) ) {
 			thessley_log_event( 'passkey-login', 'signature_invalid', 'blocked', 'credential ' . $cred_id );
@@ -653,6 +723,14 @@ class Thessley_Module_Passkey_Login {
 			<tr>
 				<th>Login method</th>
 				<td>
+					<?php
+					$preferred = self::user_preferred_mode( $user->ID );
+					$labels    = array(
+						'optional' => 'Password or the app',
+						'2fa'      => 'Password, then app confirmation',
+						'required' => 'App only — password login disabled',
+					);
+					?>
 					<?php if ( ! $has_device ) : ?>
 						<p class="description">Add a device below to choose how this account logs in.</p>
 					<?php elseif ( 'required' === self::mode() ) : ?>
@@ -662,12 +740,13 @@ class Thessley_Module_Passkey_Login {
 							<?php wp_nonce_field( 'thessley_pk_save_user_mode_' . $user->ID ); ?>
 							<input type="hidden" name="action" value="thessley_pk_save_user_mode">
 							<input type="hidden" name="user_id" value="<?php echo esc_attr( $user->ID ); ?>">
-							<label><input type="radio" name="user_mode" value="optional" <?php checked( ! self::user_prefers_app_only( $user->ID ) ); ?>> Password or the app</label><br>
-							<label><input type="radio" name="user_mode" value="required" <?php checked( self::user_prefers_app_only( $user->ID ) ); ?>> App only — disable password login for this account</label>
+							<?php foreach ( $labels as $value => $label ) : ?>
+								<label><input type="radio" name="user_mode" value="<?php echo esc_attr( $value ); ?>" <?php checked( $value, $preferred ); ?>> <?php echo esc_html( $label ); ?></label><br>
+							<?php endforeach; ?>
 							<?php submit_button( 'Save', 'secondary', 'submit', false, array( 'style' => 'margin-top:8px' ) ); ?>
 						</form>
 					<?php else : ?>
-						<p class="description"><?php echo self::user_prefers_app_only( $user->ID ) ? 'App only.' : 'Password or the app.'; ?></p>
+						<p class="description"><?php echo esc_html( $labels[ $preferred ] ); ?></p>
 					<?php endif; ?>
 				</td>
 			</tr>
@@ -785,11 +864,13 @@ class Thessley_Module_Passkey_Login {
 		}
 
 		// A user with no active device can't meaningfully choose
-		// app-only — there'd be nothing to log in with. Silently treat
-		// as 'optional' rather than trusting a posted value for a state
-		// the UI never actually offers them.
-		$mode = ( self::user_has_active_device( $target_user_id ) && isset( $_POST['user_mode'] ) && 'required' === $_POST['user_mode'] )
-			? 'required'
+		// Neither 2fa nor required mean anything without a device to
+		// confirm with — there'd be nothing to log in with. Silently fall
+		// back to 'optional' rather than trusting a posted value for a
+		// state the UI never actually offers them.
+		$posted = (string) ( $_POST['user_mode'] ?? '' );
+		$mode   = ( self::user_has_active_device( $target_user_id ) && in_array( $posted, array( '2fa', 'required' ), true ) )
+			? $posted
 			: 'optional';
 
 		update_user_meta( $target_user_id, 'thessley_passkey_user_mode', $mode );
@@ -814,19 +895,40 @@ class Thessley_Module_Passkey_Login {
 			return $user; // already an error (wrong password/unknown user), or no credentials submitted — nothing to do
 		}
 
-		if ( 'required' !== self::effective_mode_for_user( $user->ID ) ) {
+		$mode = self::effective_mode_for_user( $user->ID );
+
+		if ( 'optional' === $mode ) {
 			return $user;
 		}
 
-		thessley_log_event( 'passkey-login', 'password_login_blocked', 'blocked', 'user #' . $user->ID . ' — passkey-only' );
+		if ( 'required' === $mode ) {
+			thessley_log_event( 'passkey-login', 'password_login_blocked', 'blocked', 'user #' . $user->ID . ' — passkey-only' );
 
-		return new WP_Error(
-			'thessley_passkey_required',
-			sprintf(
-				/* translators: %s: site name */
-				__( '<strong>Password login is disabled for this account.</strong> Use the %s app to log in.', 'thessley-security-hardening' ),
-				esc_html( get_bloginfo( 'name' ) )
-			)
-		);
+			return new WP_Error(
+				'thessley_passkey_required',
+				sprintf(
+					/* translators: %s: site name */
+					__( '<strong>Password login is disabled for this account.</strong> Use the %s app to log in.', 'thessley-security-hardening' ),
+					esc_html( get_bloginfo( 'name' ) )
+				)
+			);
+		}
+
+		// '2fa': the password was correct, but login isn't finished yet —
+		// this bypasses wp_signon()'s normal completion entirely (no
+		// cookie set here) and sends the browser to an app-confirmation
+		// page instead. That page is bound to this exact user_id, so only
+		// their own enrolled device(s) can approve it — unlike a plain
+		// login request, which doesn't know who's logging in until a
+		// device claims it (see this module's docblock on the BankID-
+		// style identification model; a 2fa request is deliberately the
+		// opposite of that, since the password step already identified
+		// the user).
+		$result = Thessley_Passkey_Store::create_request( '2fa', $user->ID, self::LOGIN_TTL );
+
+		thessley_log_event( 'passkey-login', 'password_step_ok', 'noted', 'user #' . $user->ID . ' — awaiting app confirmation' );
+
+		wp_safe_redirect( home_url( 'thessley-auth/2fa/' . $result['request_id'] . '/' ) );
+		exit;
 	}
 }
