@@ -69,7 +69,6 @@ class Thessley_Module_Passkey_Login {
 		add_action( 'init', array( __CLASS__, 'add_rewrite_rule' ) );
 		add_filter( 'query_vars', array( __CLASS__, 'add_query_vars' ) );
 		add_action( 'template_redirect', array( __CLASS__, 'maybe_render_auth_page' ) );
-		add_action( 'template_redirect', array( __CLASS__, 'maybe_render_assetlinks' ) );
 
 		add_action( 'rest_api_init', array( __CLASS__, 'register_routes' ) );
 
@@ -94,7 +93,22 @@ class Thessley_Module_Passkey_Login {
 		return in_array( $mode, array( 'optional', 'required' ), true ) ? $mode : 'optional';
 	}
 
-	// --- Rewrite route: the literal URL encoded in the QR / App Link ---
+	// --- Rewrite route: the human-facing fallback page -------------------
+	//
+	// Not used by the app at all (see app_link()'s docblock below) — this
+	// plugin runs on arbitrary,
+	// unrelated customer domains, and Android App Links' autoVerify
+	// requires every destination domain to be individually declared in
+	// the app's manifest plus serve a matching assetlinks.json, which
+	// doesn't scale across installs the way it does for a single-issuer
+	// app like BankID. Both the QR content and the same-device tap target
+	// are instead a custom URI scheme (app_link(), below) that works
+	// identically regardless of which site it points at, with the app
+	// doing its own in-app camera scan rather than relying on the OS to
+	// hand a scanned https URL to the right app. This route exists only
+	// so a human who opens the QR's https URL some other way (e.g. a
+	// generic camera app that doesn't know about the custom scheme) lands
+	// somewhere coherent instead of a 404.
 
 	public static function add_rewrite_rule() {
 		add_rewrite_tag( '%thessley_auth_type%', '(login|enroll)' );
@@ -104,72 +118,46 @@ class Thessley_Module_Passkey_Login {
 			'index.php?thessley_auth_type=$matches[1]&thessley_auth_id=$matches[2]',
 			'top'
 		);
-
-		// Android Digital Asset Links statement, required for App Links to
-		// open the app directly from the thessley-auth URLs above instead
-		// of falling through to a browser. Routed through WP rewrite
-		// rather than a literal file, same as every other URL this module
-		// owns — standard WP installs (mod_rewrite/.htaccess, or nginx
-		// try_files to index.php) already make this work for thessley-auth,
-		// so it works here too.
-		add_rewrite_rule(
-			'^\.well-known/assetlinks\.json$',
-			'index.php?thessley_assetlinks=1',
-			'top'
-		);
 	}
 
 	public static function add_query_vars( $vars ) {
 		$vars[] = 'thessley_auth_type';
 		$vars[] = 'thessley_auth_id';
-		$vars[] = 'thessley_assetlinks';
 		return $vars;
 	}
 
 	/**
-	 * Placeholder values — fill in once the app has a real applicationId
-	 * and release signing certificate. Get the fingerprint with:
-	 *   keytool -list -v -keystore <release.keystore> | grep SHA256
-	 * A filter rather than a settings-page field: this is a one-time,
-	 * developer-level value, not something a site admin sets per site.
+	 * Placeholder — fill in once the app has a real applicationId, so the
+	 * fallback page's Play Store link resolves. A filter rather than a
+	 * settings-page field: one-time developer-level value, not something
+	 * a site admin sets per site.
 	 */
 	private static function app_package_id() {
 		return apply_filters( 'thessley_passkey_app_package_id', 'REPLACE_WITH_APP_PACKAGE_ID' );
 	}
 
-	private static function app_cert_fingerprint() {
-		return apply_filters( 'thessley_passkey_app_cert_fingerprint', 'REPLACE_WITH_APP_SHA256_CERT_FINGERPRINT' );
-	}
-
-	public static function maybe_render_assetlinks() {
-		if ( ! get_query_var( 'thessley_assetlinks' ) ) {
-			return;
-		}
-
-		nocache_headers();
-		header( 'Content-Type: application/json; charset=utf-8' );
-
-		echo wp_json_encode(
+	/**
+	 * Custom-scheme URI — the actual QR payload and same-device tap
+	 * target. Carries everything the app needs to sign (type, request_id,
+	 * nonce, origin) without any server round-trip after scanning/tapping,
+	 * and works identically on every site since custom schemes don't
+	 * require per-domain registration the way https App Links do.
+	 */
+	private static function app_link( $type, $request_id, $nonce ) {
+		return 'thessleypasskey://auth?' . http_build_query(
 			array(
-				array(
-					'relation' => array( 'delegate_permission/common.handle_all_urls' ),
-					'target'   => array(
-						'namespace'              => 'android_app',
-						'package_name'           => self::app_package_id(),
-						'sha256_cert_fingerprints' => array( self::app_cert_fingerprint() ),
-					),
-				),
+				'type'   => $type,
+				'id'     => $request_id,
+				'nonce'  => $nonce,
+				'origin' => home_url(),
 			)
 		);
-		exit;
 	}
 
 	/**
-	 * Fallback page for the QR/App-Link URL when it doesn't open the app
-	 * directly (app not installed, or a desktop browser following a QR
-	 * photographed by something other than the app). On an Android device
-	 * with the app installed, App Links intercept this URL before it ever
-	 * reaches here.
+	 * Fallback page for the QR/link's https URL, for a human who opens it
+	 * some other way than the app's own scanner/tap handling (see the
+	 * docblock above this section).
 	 */
 	public static function maybe_render_auth_page() {
 		$type = get_query_var( 'thessley_auth_type' );
@@ -290,8 +278,9 @@ class Thessley_Module_Passkey_Login {
 			return new WP_Error( 'thessley_rate_limited', 'Too many requests.', array( 'status' => 429 ) );
 		}
 
-		$result         = Thessley_Passkey_Store::create_request( 'login', null, self::LOGIN_TTL );
-		$result['url']  = home_url( 'thessley-auth/login/' . $result['request_id'] . '/' );
+		$result             = Thessley_Passkey_Store::create_request( 'login', null, self::LOGIN_TTL );
+		$result['url']      = home_url( 'thessley-auth/login/' . $result['request_id'] . '/' );
+		$result['app_link'] = self::app_link( 'login', $result['request_id'], $result['nonce'] );
 
 		return rest_ensure_response( $result );
 	}
@@ -387,8 +376,9 @@ class Thessley_Module_Passkey_Login {
 			return new WP_Error( 'thessley_passkey_disabled', 'Passkey login is not enabled on this site.', array( 'status' => 403 ) );
 		}
 
-		$result        = Thessley_Passkey_Store::create_request( 'enroll', get_current_user_id(), self::ENROLL_TTL );
-		$result['url'] = home_url( 'thessley-auth/enroll/' . $result['request_id'] . '/' );
+		$result             = Thessley_Passkey_Store::create_request( 'enroll', get_current_user_id(), self::ENROLL_TTL );
+		$result['url']      = home_url( 'thessley-auth/enroll/' . $result['request_id'] . '/' );
+		$result['app_link'] = self::app_link( 'enroll', $result['request_id'], $result['nonce'] );
 
 		return rest_ensure_response( $result );
 	}
@@ -490,9 +480,9 @@ class Thessley_Module_Passkey_Login {
 			"  if (!box) return;\n" .
 			"  fetch('{$rest_base}/start', {method:'POST'}).then(function(r){return r.json();}).then(function(data){\n" .
 			"    var linkEl = document.getElementById('thessley-passkey-link');\n" .
-			"    if (linkEl) { linkEl.href = data.url; }\n" .
+			"    if (linkEl) { linkEl.href = data.app_link; }\n" .
 			"    var urlEl = document.getElementById('thessley-passkey-url');\n" .
-			"    if (urlEl) { urlEl.textContent = data.url; }\n" .
+			"    if (urlEl) { urlEl.textContent = data.app_link; }\n" .
 			"    var poll = setInterval(function(){\n" .
 			"      fetch('{$rest_base}/' + data.request_id + '/status').then(function(r){return r.json();}).then(function(s){\n" .
 			"        if (s.status === 'approved') { clearInterval(poll); window.location.href = s.redirect_to; }\n" .
@@ -509,7 +499,7 @@ class Thessley_Module_Passkey_Login {
 		<div id="thessley-passkey-box" style="margin:16px 0;padding:12px;border:1px solid #dcdcde;border-radius:4px;text-align:center">
 			<p><strong>Log in with the <?php echo esc_html( get_bloginfo( 'name' ) ); ?> app</strong></p>
 			<p class="description">
-				On another device: scan this link's URL as a QR code (QR image rendering not yet wired up — see module.php docblock).<br>
+				On another device: open the <?php echo esc_html( get_bloginfo( 'name' ) ); ?> app and scan this as a QR code (QR image rendering not yet wired up — see module.php docblock).<br>
 				<code id="thessley-passkey-url">loading…</code>
 			</p>
 			<p><a id="thessley-passkey-link" href="#">Open on this device</a></p>
