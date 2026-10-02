@@ -107,7 +107,16 @@ class Thessley_Module_Passkey_Login {
 	 */
 	public static function mode() {
 		$mode = get_option( 'thessley_passkey_mode', 'optional' );
-		return in_array( $mode, array( 'optional', 'required' ), true ) ? $mode : 'optional';
+		return in_array( $mode, array( 'optional', '2fa', 'required' ), true ) ? $mode : 'optional';
+	}
+
+	private static function mode_rank( $mode ) {
+		$ranks = array(
+			'optional' => 0,
+			'2fa'      => 1,
+			'required' => 2,
+		);
+		return $ranks[ $mode ] ?? 0;
 	}
 
 	private static function user_has_active_device( $user_id ) {
@@ -143,10 +152,9 @@ class Thessley_Module_Passkey_Login {
 		if ( ! self::user_has_active_device( $user_id ) ) {
 			return 'optional'; // nothing to require yet, regardless of any setting
 		}
-		if ( 'required' === self::mode() ) {
-			return 'required';
-		}
-		return self::user_preferred_mode( $user_id );
+		$site = self::mode();
+		$user = self::user_preferred_mode( $user_id );
+		return self::mode_rank( $site ) >= self::mode_rank( $user ) ? $site : $user;
 	}
 
 	// --- Rewrite route: the human-facing fallback page -------------------
@@ -599,15 +607,24 @@ class Thessley_Module_Passkey_Login {
 	}
 
 	/**
-	 * When every account on this site is required to use the app, there's
-	 * no point showing the password form as the primary view and burying
-	 * the one working option behind a click — but it still can't be
-	 * removed outright: a user with no device yet (a freshly created
-	 * admin who hasn't enrolled) still needs password login, and the
-	 * identity of whoever's about to log in isn't known at page-load time
-	 * (this module doesn't ask for a username first) to tell those two
-	 * cases apart. So the password form is hidden by CSS, not removed,
-	 * with a "Use a password instead" link to bring it back.
+	 * Exactly one screen per site mode, no toggle, no in-between state:
+	 *  - optional:  the plain password form. Nothing from this module
+	 *               shows at all — a per-user '2fa'/'required' override
+	 *               stricter than this still gets enforced after submit,
+	 *               it's just not pre-announced on the page.
+	 *  - 2fa:       also just the plain password form — the app step
+	 *               only exists *after* a correct password, which
+	 *               maybe_block_password_login()'s redirect already
+	 *               handles. Nothing to render here either.
+	 *  - required:  the password form is pointless for every account
+	 *               that has a device, so it's hidden and the QR is shown
+	 *               already-polling. Not removed outright, and not just
+	 *               hidden with no way back: a user with no device yet
+	 *               (e.g. a freshly created admin) still needs it, and
+	 *               identity isn't known at page-load time to tell those
+	 *               cases apart — so a small, deliberately de-emphasized
+	 *               "Use a password instead" link stays as a lockout
+	 *               escape hatch.
 	 */
 	public static function login_head_styles() {
 		if ( 'required' === self::mode() ) {
@@ -616,89 +633,60 @@ class Thessley_Module_Passkey_Login {
 	}
 
 	public static function login_page_assets() {
+		if ( 'required' !== self::mode() ) {
+			return; // optional/2fa: plain password form, nothing of this module's to load
+		}
+
 		wp_enqueue_script( 'thessley-qrcodejs', THESSLEY_PLUGIN_URL . 'assets/vendor/qrcode.min.js', array(), THESSLEY_VERSION, true );
 
 		wp_register_script( 'thessley-passkey-login', false, array( 'thessley-qrcodejs' ), THESSLEY_VERSION, true );
 		wp_enqueue_script( 'thessley-passkey-login' );
 
-		$rest_base      = esc_url_raw( rest_url( 'thessley/v1/passkey/login' ) );
-		$required_first = ( 'required' === self::mode() ) ? 'true' : 'false';
+		$rest_base = esc_url_raw( rest_url( 'thessley/v1/passkey/login' ) );
 
 		wp_add_inline_script(
 			'thessley-passkey-login',
 			"(function(){\n" .
-			"  var toggle = document.getElementById('thessley-passkey-toggle');\n" .
-			"  var pwToggle = document.getElementById('thessley-password-toggle');\n" .
 			"  var box = document.getElementById('thessley-passkey-box');\n" .
+			"  var pwToggle = document.getElementById('thessley-password-toggle');\n" .
 			"  var form = document.getElementById('loginform');\n" .
 			"  if (!box) return;\n" .
-			"  var started = false;\n" .
-			"  function startPolling() {\n" .
-			"    if (started) return;\n" .
-			"    started = true;\n" .
-			"    fetch('{$rest_base}/start', {method:'POST'}).then(function(r){return r.json();}).then(function(data){\n" .
-			"      new QRCode(document.getElementById('thessley-passkey-qr'), {text: data.app_link, width: 180, height: 180});\n" .
-			"      var linkEl = document.getElementById('thessley-passkey-link');\n" .
-			"      if (linkEl) { linkEl.href = data.app_link; }\n" .
-			"      var poll = setInterval(function(){\n" .
-			"        fetch('{$rest_base}/' + data.request_id + '/status').then(function(r){return r.json();}).then(function(s){\n" .
-			"          if (s.status === 'approved') { clearInterval(poll); window.location.href = s.redirect_to; }\n" .
-			"          if (s.status === 'denied' || s.status === 'expired') { clearInterval(poll); box.textContent = 'Request ' + s.status + ' — refresh to try again.'; }\n" .
-			"        });\n" .
-			"      }, 1500);\n" .
+			"  fetch('{$rest_base}/start', {method:'POST'}).then(function(r){return r.json();}).then(function(data){\n" .
+			"    new QRCode(document.getElementById('thessley-passkey-qr'), {text: data.app_link, width: 180, height: 180});\n" .
+			"    var linkEl = document.getElementById('thessley-passkey-link');\n" .
+			"    if (linkEl) { linkEl.href = data.app_link; }\n" .
+			"    var poll = setInterval(function(){\n" .
+			"      fetch('{$rest_base}/' + data.request_id + '/status').then(function(r){return r.json();}).then(function(s){\n" .
+			"        if (s.status === 'approved') { clearInterval(poll); window.location.href = s.redirect_to; }\n" .
+			"        if (s.status === 'denied' || s.status === 'expired') { clearInterval(poll); box.textContent = 'Request ' + s.status + ' — refresh to try again.'; }\n" .
+			"      });\n" .
+			"    }, 1500);\n" .
+			"  });\n" .
+			"  if (pwToggle && form) {\n" .
+			"    pwToggle.addEventListener('click', function (e) {\n" .
+			"      e.preventDefault();\n" .
+			"      form.style.display = 'block';\n" .
+			"      box.style.display = 'none';\n" .
 			"    });\n" .
 			"  }\n" .
-			"  if ({$required_first}) {\n" .
-			"    box.style.display = 'block';\n" .
-			"    startPolling();\n" .
-			"    if (pwToggle && form) {\n" .
-			"      pwToggle.addEventListener('click', function (e) {\n" .
-			"        e.preventDefault();\n" .
-			"        form.style.display = 'block';\n" .
-			"        box.style.display = 'none';\n" .
-			"      });\n" .
-			"    }\n" .
-			"    return;\n" .
-			"  }\n" .
-			"  if (!toggle) return;\n" .
-			"  toggle.addEventListener('click', function (e) {\n" .
-			"    e.preventDefault();\n" .
-			"    box.style.display = (box.style.display === 'none' || !box.style.display) ? 'block' : 'none';\n" .
-			"    if (box.style.display !== 'none') startPolling();\n" .
-			"  });\n" .
 			'})();'
 		);
 	}
 
-	/**
-	 * Hooked to 'login_footer', not 'login_form' — 'login_form' fires
-	 * *inside* the password <form>, which both looks wrong (the app box
-	 * competing with the password fields for attention) and risks the
-	 * same nested-element problems invalid markup causes elsewhere in
-	 * this module. Which element is primary/default-visible depends on
-	 * the site's mode() floor (see login_head_styles()); per-user modes
-	 * ('2fa', or a personal 'required' with the site floor still
-	 * 'optional') can't be known yet at this point — nobody's identified
-	 * themselves — so this is necessarily a site-wide, not per-user,
-	 * decision.
-	 */
+	/** Hooked to 'login_footer', not 'login_form' — see login_head_styles()'s docblock for why nothing renders at all except in 'required' mode. */
 	public static function login_form_markup() {
-		$required = ( 'required' === self::mode() );
+		if ( 'required' !== self::mode() ) {
+			return;
+		}
 		?>
-		<?php if ( $required ) : ?>
-			<p style="text-align:center;margin-top:16px">
-				<a href="#" id="thessley-password-toggle">Use a password instead</a>
-			</p>
-		<?php else : ?>
-			<p style="text-align:center;margin-top:16px">
-				<a href="#" id="thessley-passkey-toggle">Log in with the <?php echo esc_html( get_bloginfo( 'name' ) ); ?> app instead</a>
-			</p>
-		<?php endif; ?>
-		<div id="thessley-passkey-box" style="display:none;margin:12px 0;padding:12px;border:1px solid #dcdcde;border-radius:4px;text-align:center">
-			<p class="description">On another device: open the app and scan this code.</p>
+		<div id="thessley-passkey-box" style="margin:12px 0;padding:12px;border:1px solid #dcdcde;border-radius:4px;text-align:center">
+			<p class="description">Scan this code with the <?php echo esc_html( get_bloginfo( 'name' ) ); ?> app to log in.</p>
 			<div id="thessley-passkey-qr" style="display:inline-block;line-height:0"></div>
 			<p><a id="thessley-passkey-link" href="#">Open on this device</a></p>
 		</div>
+		<p style="text-align:center;font-size:12px">
+			<a href="#" id="thessley-password-toggle">Use a password instead</a>
+		</p>
 		<?php
 	}
 
@@ -710,8 +698,11 @@ class Thessley_Module_Passkey_Login {
 			wp_die( 'Forbidden', 403 );
 		}
 
+		$posted = (string) ( $_POST['mode'] ?? '' );
+		$mode   = in_array( $posted, array( '2fa', 'required' ), true ) ? $posted : 'optional';
+
 		update_option( 'thessley_passkey_enabled', isset( $_POST['enabled'] ) );
-		update_option( 'thessley_passkey_mode', ( isset( $_POST['mode'] ) && 'required' === $_POST['mode'] ) ? 'required' : 'optional' );
+		update_option( 'thessley_passkey_mode', $mode );
 
 		wp_safe_redirect( add_query_arg( 'saved', '1', wp_get_referer() ) );
 		exit;
@@ -751,14 +742,15 @@ class Thessley_Module_Passkey_Login {
 			);
 
 			Thessley_UI::row(
-				'Mode',
+				'Login method',
 				function () use ( $mode ) {
 					?>
-					<label><input type="radio" name="mode" value="optional" <?php checked( 'optional', $mode ); ?>> Optional — password login still works</label><br>
-					<label><input type="radio" name="mode" value="required" <?php checked( 'required', $mode ); ?>> Required — password login is refused for any user with an enrolled device</label>
+					<label><input type="radio" name="mode" value="optional" <?php checked( 'optional', $mode ); ?>> Password — the login page shows the normal password form only</label><br>
+					<label><input type="radio" name="mode" value="2fa" <?php checked( '2fa', $mode ); ?>> Password, then app — password first, the app confirms it afterward</label><br>
+					<label><input type="radio" name="mode" value="required" <?php checked( 'required', $mode ); ?>> App only — the login page shows a QR code only, no password form</label>
 					<?php
 				},
-				'A user with no enrolled device always falls back to password, regardless of this setting — there is nothing to require yet.'
+				'A user with no device enrolled always falls back to plain password, regardless of this setting — there is nothing to confirm with yet. A user can also set a stricter method than this for just their own account on their profile page, but never a looser one.'
 			);
 
 			submit_button( 'Save settings' );
