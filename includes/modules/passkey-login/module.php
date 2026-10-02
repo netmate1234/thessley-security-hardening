@@ -451,7 +451,17 @@ class Thessley_Module_Passkey_Login {
 
 		thessley_log_event( 'passkey-login', 'enroll_approved', 'noted', 'user #' . (int) $request->requester_user_id . ' added device "' . sanitize_text_field( $label ) . '"' );
 
-		return rest_ensure_response( array( 'result' => 'ok' ) );
+		// The app needs this for every future login/respond call — it has
+		// no other way to learn the server-assigned credential_id, since
+		// it necessarily generated its local keypair before this request
+		// (the server can't hand out an id for a key it hasn't verified
+		// possession of yet).
+		return rest_ensure_response(
+			array(
+				'result'        => 'ok',
+				'credential_id' => $credential_id,
+			)
+		);
 	}
 
 	/** $request->credential_id stores the passkeys.id row id, not the credential_id string — this resolves one to the other for display. */
