@@ -154,6 +154,7 @@ if ( ! function_exists( 'thessley_severity_map' ) ) {
 			'user-watchdog:privileged_user_deleted' => 17,
 
 			// --- Serious exploitation attempts ------------------------
+			'passkey-login:signature_invalid'       => 13,
 			'query-guard:upload_executable_ext'     => 17,
 			'query-guard:body_php_open_tag'         => 16,
 			'query-guard:body_eval_exec'            => 16,
@@ -188,6 +189,7 @@ if ( ! function_exists( 'thessley_severity_map' ) ) {
 			'query-guard:other_null_byte'           => 11,
 
 			// --- Targeted probing / confirmed brute force -------------
+			'passkey-login:login_denied'            => 10,
 			'login-guard:lockout'                   => 12,
 			'login-guard:locked_attempt'            => 10,
 			'query-guard:xmlrpc_access'             => 10,
@@ -209,6 +211,9 @@ if ( ! function_exists( 'thessley_severity_map' ) ) {
 			'auto-update:update_failed'             => 6,
 			'auto-update:updater_disabled'          => 5,
 			'login-guard:login_success'             => 2,
+			'passkey-login:login_approved'          => 2,
+			'passkey-login:enroll_approved'         => 2,
+			'passkey-login:device_revoked'          => 4,
 			'auto-update:updated'                   => 2,
 			'file-integrity:baseline_taken'         => 1,
 			'user-watchdog:snapshot_taken'          => 1,

@@ -38,6 +38,7 @@ class Thessley_Menu_Router {
 					'geo-blocker'  => array( 'Thessley_Module_Geo_Blocker', 'render_page' ),
 					'geo-login'    => array( 'Thessley_Module_Geo_Login', 'render_page' ),
 					'rate-limiter' => array( 'Thessley_Module_Rate_Limiter', 'render_page' ),
+					'passkey-login' => array( 'Thessley_Module_Passkey_Login', 'render_page' ),
 				),
 			),
 			'inspection' => array(
