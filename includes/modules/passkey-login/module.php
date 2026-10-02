@@ -83,6 +83,7 @@ class Thessley_Module_Passkey_Login {
 		add_action( 'rest_api_init', array( __CLASS__, 'register_routes' ) );
 
 		if ( self::enabled() ) {
+			add_action( 'login_head', array( __CLASS__, 'login_head_styles' ) );
 			add_action( 'login_enqueue_scripts', array( __CLASS__, 'login_page_assets' ) );
 			add_action( 'login_footer', array( __CLASS__, 'login_form_markup' ) );
 		}
@@ -597,25 +598,43 @@ class Thessley_Module_Passkey_Login {
 		wp_enqueue_script( 'thessley-qrcodejs', THESSLEY_PLUGIN_URL . 'assets/vendor/qrcode.min.js', array(), THESSLEY_VERSION, true );
 	}
 
+	/**
+	 * When every account on this site is required to use the app, there's
+	 * no point showing the password form as the primary view and burying
+	 * the one working option behind a click — but it still can't be
+	 * removed outright: a user with no device yet (a freshly created
+	 * admin who hasn't enrolled) still needs password login, and the
+	 * identity of whoever's about to log in isn't known at page-load time
+	 * (this module doesn't ask for a username first) to tell those two
+	 * cases apart. So the password form is hidden by CSS, not removed,
+	 * with a "Use a password instead" link to bring it back.
+	 */
+	public static function login_head_styles() {
+		if ( 'required' === self::mode() ) {
+			echo '<style>#loginform{display:none}</style>';
+		}
+	}
+
 	public static function login_page_assets() {
 		wp_enqueue_script( 'thessley-qrcodejs', THESSLEY_PLUGIN_URL . 'assets/vendor/qrcode.min.js', array(), THESSLEY_VERSION, true );
 
 		wp_register_script( 'thessley-passkey-login', false, array( 'thessley-qrcodejs' ), THESSLEY_VERSION, true );
 		wp_enqueue_script( 'thessley-passkey-login' );
 
-		$rest_base = esc_url_raw( rest_url( 'thessley/v1/passkey/login' ) );
+		$rest_base      = esc_url_raw( rest_url( 'thessley/v1/passkey/login' ) );
+		$required_first = ( 'required' === self::mode() ) ? 'true' : 'false';
 
 		wp_add_inline_script(
 			'thessley-passkey-login',
 			"(function(){\n" .
 			"  var toggle = document.getElementById('thessley-passkey-toggle');\n" .
+			"  var pwToggle = document.getElementById('thessley-password-toggle');\n" .
 			"  var box = document.getElementById('thessley-passkey-box');\n" .
-			"  if (!toggle || !box) return;\n" .
+			"  var form = document.getElementById('loginform');\n" .
+			"  if (!box) return;\n" .
 			"  var started = false;\n" .
-			"  toggle.addEventListener('click', function (e) {\n" .
-			"    e.preventDefault();\n" .
-			"    box.style.display = (box.style.display === 'none' || !box.style.display) ? 'block' : 'none';\n" .
-			"    if (started || box.style.display === 'none') return;\n" .
+			"  function startPolling() {\n" .
+			"    if (started) return;\n" .
 			"    started = true;\n" .
 			"    fetch('{$rest_base}/start', {method:'POST'}).then(function(r){return r.json();}).then(function(data){\n" .
 			"      new QRCode(document.getElementById('thessley-passkey-qr'), {text: data.app_link, width: 180, height: 180});\n" .
@@ -628,6 +647,24 @@ class Thessley_Module_Passkey_Login {
 			"        });\n" .
 			"      }, 1500);\n" .
 			"    });\n" .
+			"  }\n" .
+			"  if ({$required_first}) {\n" .
+			"    box.style.display = 'block';\n" .
+			"    startPolling();\n" .
+			"    if (pwToggle && form) {\n" .
+			"      pwToggle.addEventListener('click', function (e) {\n" .
+			"        e.preventDefault();\n" .
+			"        form.style.display = 'block';\n" .
+			"        box.style.display = 'none';\n" .
+			"      });\n" .
+			"    }\n" .
+			"    return;\n" .
+			"  }\n" .
+			"  if (!toggle) return;\n" .
+			"  toggle.addEventListener('click', function (e) {\n" .
+			"    e.preventDefault();\n" .
+			"    box.style.display = (box.style.display === 'none' || !box.style.display) ? 'block' : 'none';\n" .
+			"    if (box.style.display !== 'none') startPolling();\n" .
 			"  });\n" .
 			'})();'
 		);
@@ -638,15 +675,25 @@ class Thessley_Module_Passkey_Login {
 	 * *inside* the password <form>, which both looks wrong (the app box
 	 * competing with the password fields for attention) and risks the
 	 * same nested-element problems invalid markup causes elsewhere in
-	 * this module. Password login stays the default, primary thing shown;
-	 * the app is a toggled-open secondary option, and the QR isn't even
-	 * requested from the server until that toggle is actually opened.
+	 * this module. Which element is primary/default-visible depends on
+	 * the site's mode() floor (see login_head_styles()); per-user modes
+	 * ('2fa', or a personal 'required' with the site floor still
+	 * 'optional') can't be known yet at this point — nobody's identified
+	 * themselves — so this is necessarily a site-wide, not per-user,
+	 * decision.
 	 */
 	public static function login_form_markup() {
+		$required = ( 'required' === self::mode() );
 		?>
-		<p style="text-align:center;margin-top:16px">
-			<a href="#" id="thessley-passkey-toggle">Log in with the <?php echo esc_html( get_bloginfo( 'name' ) ); ?> app instead</a>
-		</p>
+		<?php if ( $required ) : ?>
+			<p style="text-align:center;margin-top:16px">
+				<a href="#" id="thessley-password-toggle">Use a password instead</a>
+			</p>
+		<?php else : ?>
+			<p style="text-align:center;margin-top:16px">
+				<a href="#" id="thessley-passkey-toggle">Log in with the <?php echo esc_html( get_bloginfo( 'name' ) ); ?> app instead</a>
+			</p>
+		<?php endif; ?>
 		<div id="thessley-passkey-box" style="display:none;margin:12px 0;padding:12px;border:1px solid #dcdcde;border-radius:4px;text-align:center">
 			<p class="description">On another device: open the app and scan this code.</p>
 			<div id="thessley-passkey-qr" style="display:inline-block;line-height:0"></div>
