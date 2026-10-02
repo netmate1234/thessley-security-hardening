@@ -607,24 +607,27 @@ class Thessley_Module_Passkey_Login {
 	}
 
 	/**
-	 * Exactly one screen per site mode, no toggle, no in-between state:
-	 *  - optional:  the plain password form. Nothing from this module
-	 *               shows at all — a per-user '2fa'/'required' override
-	 *               stricter than this still gets enforced after submit,
-	 *               it's just not pre-announced on the page.
-	 *  - 2fa:       also just the plain password form — the app step
-	 *               only exists *after* a correct password, which
-	 *               maybe_block_password_login()'s redirect already
-	 *               handles. Nothing to render here either.
-	 *  - required:  the password form is pointless for every account
-	 *               that has a device, so it's hidden and the QR is shown
-	 *               already-polling. Not removed outright, and not just
-	 *               hidden with no way back: a user with no device yet
-	 *               (e.g. a freshly created admin) still needs it, and
-	 *               identity isn't known at page-load time to tell those
-	 *               cases apart — so a small, deliberately de-emphasized
-	 *               "Use a password instead" link stays as a lockout
-	 *               escape hatch.
+	 * App login must always be reachable from this page, in every mode —
+	 * a per-user preference can be stricter than the site default (see
+	 * effective_mode_for_user()), and that user still needs a way to
+	 * actually *use* the app here even when the site default wouldn't
+	 * otherwise show it. What differs per mode is only which one is the
+	 * primary, default-visible view:
+	 *  - optional/2fa: password form is primary; the app is a small
+	 *                  "Log in with the app instead" toggle that reveals
+	 *                  the QR (and only then requests one) on click.
+	 *                  2fa's password-then-app step itself needs no UI
+	 *                  here at all — maybe_block_password_login()'s
+	 *                  redirect handles that entirely after submit; this
+	 *                  toggle is a separate, independent app-only path.
+	 *  - required:     the password form is pointless for every account
+	 *                  that already has a device, so it's hidden by CSS
+	 *                  and the QR is shown already-polling instead. Not
+	 *                  removed outright: an account with no device yet
+	 *                  still needs it, and identity isn't known at
+	 *                  page-load time to tell those cases apart — so a
+	 *                  small, de-emphasized "Use a password instead" link
+	 *                  stays as a lockout escape hatch.
 	 */
 	public static function login_head_styles() {
 		if ( 'required' === self::mode() ) {
@@ -633,60 +636,78 @@ class Thessley_Module_Passkey_Login {
 	}
 
 	public static function login_page_assets() {
-		if ( 'required' !== self::mode() ) {
-			return; // optional/2fa: plain password form, nothing of this module's to load
-		}
-
 		wp_enqueue_script( 'thessley-qrcodejs', THESSLEY_PLUGIN_URL . 'assets/vendor/qrcode.min.js', array(), THESSLEY_VERSION, true );
 
 		wp_register_script( 'thessley-passkey-login', false, array( 'thessley-qrcodejs' ), THESSLEY_VERSION, true );
 		wp_enqueue_script( 'thessley-passkey-login' );
 
-		$rest_base = esc_url_raw( rest_url( 'thessley/v1/passkey/login' ) );
+		$rest_base      = esc_url_raw( rest_url( 'thessley/v1/passkey/login' ) );
+		$required_first = ( 'required' === self::mode() ) ? 'true' : 'false';
 
 		wp_add_inline_script(
 			'thessley-passkey-login',
 			"(function(){\n" .
-			"  var box = document.getElementById('thessley-passkey-box');\n" .
+			"  var toggle = document.getElementById('thessley-passkey-toggle');\n" .
 			"  var pwToggle = document.getElementById('thessley-password-toggle');\n" .
+			"  var box = document.getElementById('thessley-passkey-box');\n" .
 			"  var form = document.getElementById('loginform');\n" .
 			"  if (!box) return;\n" .
-			"  fetch('{$rest_base}/start', {method:'POST'}).then(function(r){return r.json();}).then(function(data){\n" .
-			"    new QRCode(document.getElementById('thessley-passkey-qr'), {text: data.app_link, width: 180, height: 180});\n" .
-			"    var linkEl = document.getElementById('thessley-passkey-link');\n" .
-			"    if (linkEl) { linkEl.href = data.app_link; }\n" .
-			"    var poll = setInterval(function(){\n" .
-			"      fetch('{$rest_base}/' + data.request_id + '/status').then(function(r){return r.json();}).then(function(s){\n" .
-			"        if (s.status === 'approved') { clearInterval(poll); window.location.href = s.redirect_to; }\n" .
-			"        if (s.status === 'denied' || s.status === 'expired') { clearInterval(poll); box.textContent = 'Request ' + s.status + ' — refresh to try again.'; }\n" .
-			"      });\n" .
-			"    }, 1500);\n" .
-			"  });\n" .
-			"  if (pwToggle && form) {\n" .
-			"    pwToggle.addEventListener('click', function (e) {\n" .
-			"      e.preventDefault();\n" .
-			"      form.style.display = 'block';\n" .
-			"      box.style.display = 'none';\n" .
+			"  var started = false;\n" .
+			"  function startPolling() {\n" .
+			"    if (started) return;\n" .
+			"    started = true;\n" .
+			"    fetch('{$rest_base}/start', {method:'POST'}).then(function(r){return r.json();}).then(function(data){\n" .
+			"      new QRCode(document.getElementById('thessley-passkey-qr'), {text: data.app_link, width: 180, height: 180});\n" .
+			"      var linkEl = document.getElementById('thessley-passkey-link');\n" .
+			"      if (linkEl) { linkEl.href = data.app_link; }\n" .
+			"      var poll = setInterval(function(){\n" .
+			"        fetch('{$rest_base}/' + data.request_id + '/status').then(function(r){return r.json();}).then(function(s){\n" .
+			"          if (s.status === 'approved') { clearInterval(poll); window.location.href = s.redirect_to; }\n" .
+			"          if (s.status === 'denied' || s.status === 'expired') { clearInterval(poll); box.textContent = 'Request ' + s.status + ' — refresh to try again.'; }\n" .
+			"        });\n" .
+			"      }, 1500);\n" .
 			"    });\n" .
 			"  }\n" .
+			"  if ({$required_first}) {\n" .
+			"    startPolling();\n" .
+			"    if (pwToggle && form) {\n" .
+			"      pwToggle.addEventListener('click', function (e) {\n" .
+			"        e.preventDefault();\n" .
+			"        form.style.display = 'block';\n" .
+			"        box.style.display = 'none';\n" .
+			"      });\n" .
+			"    }\n" .
+			"    return;\n" .
+			"  }\n" .
+			"  if (!toggle) return;\n" .
+			"  toggle.addEventListener('click', function (e) {\n" .
+			"    e.preventDefault();\n" .
+			"    box.style.display = (box.style.display === 'none' || !box.style.display) ? 'block' : 'none';\n" .
+			"    if (box.style.display !== 'none') startPolling();\n" .
+			"  });\n" .
 			'})();'
 		);
 	}
 
-	/** Hooked to 'login_footer', not 'login_form' — see login_head_styles()'s docblock for why nothing renders at all except in 'required' mode. */
+	/** Hooked to 'login_footer', not 'login_form' — 'login_form' fires inside the password <form>, which both looks wrong and risks the same nested-element problems invalid markup causes elsewhere in this module. */
 	public static function login_form_markup() {
-		if ( 'required' !== self::mode() ) {
-			return;
-		}
+		$required = ( 'required' === self::mode() );
 		?>
-		<div id="thessley-passkey-box" style="margin:12px 0;padding:12px;border:1px solid #dcdcde;border-radius:4px;text-align:center">
-			<p class="description">Scan this code with the <?php echo esc_html( get_bloginfo( 'name' ) ); ?> app to log in.</p>
+		<?php if ( ! $required ) : ?>
+			<p style="text-align:center;margin-top:16px">
+				<a href="#" id="thessley-passkey-toggle">Log in with the <?php echo esc_html( get_bloginfo( 'name' ) ); ?> app instead</a>
+			</p>
+		<?php endif; ?>
+		<div id="thessley-passkey-box" style="<?php echo $required ? '' : 'display:none;'; ?>margin:12px 0;padding:12px;border:1px solid #dcdcde;border-radius:4px;text-align:center">
+			<p class="description">Scan this code with the <?php echo esc_html( get_bloginfo( 'name' ) ); ?> app, or open it on this device.</p>
 			<div id="thessley-passkey-qr" style="display:inline-block;line-height:0"></div>
 			<p><a id="thessley-passkey-link" href="#">Open on this device</a></p>
 		</div>
-		<p style="text-align:center;font-size:12px">
-			<a href="#" id="thessley-password-toggle">Use a password instead</a>
-		</p>
+		<?php if ( $required ) : ?>
+			<p style="text-align:center;font-size:12px">
+				<a href="#" id="thessley-password-toggle">Use a password instead</a>
+			</p>
+		<?php endif; ?>
 		<?php
 	}
 
