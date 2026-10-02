@@ -65,7 +65,6 @@ class Thessley_Module_Passkey_Login {
 		add_action( self::CRON_HOOK, array( Thessley_Passkey_Store::class, 'prune_expired_requests' ) );
 		add_action( 'admin_post_thessley_pk_save_settings', array( __CLASS__, 'handle_save_settings' ) );
 		add_action( 'admin_post_thessley_pk_revoke', array( __CLASS__, 'handle_revoke' ) );
-		add_action( 'admin_post_thessley_pk_save_user_mode', array( __CLASS__, 'handle_save_user_mode' ) );
 
 		if ( self::enabled() ) {
 			// Priority 30: after core's own username/password check (20)
@@ -100,33 +99,20 @@ class Thessley_Module_Passkey_Login {
 	}
 
 	/**
-	 * Site-wide floor. 'optional': a user may still choose password-only
-	 * on their own profile. 'required': every user with an active device
-	 * is forced to passkey-only, regardless of their own profile choice
-	 * — the site setting can tighten what a user picked, never loosen it.
-	 */
-	/**
-	 * No longer a site-wide setting — a separate admin-set floor on top
-	 * of each account's own profile-page choice was two controls that
-	 * could silently drift out of sync with each other (the direct cause
-	 * of nearly every "the login page shows the wrong thing" report while
-	 * building this). The login page now always shows the one
-	 * unconditional view (password form + QR together); each account's
-	 * own choice on their profile page is still fully enforced after
-	 * password submission via effective_mode_for_user() below, unchanged
-	 * — only the page's *display*, not the enforcement, stopped varying.
+	 * Single site-wide setting, the only control — there is deliberately
+	 * no per-account override anymore. A per-account choice on top of
+	 * this was two controls that could silently drift out of sync with
+	 * each other, which is what the login page *displays* vs. what it
+	 * *enforces* was built against: the direct cause of nearly every
+	 * "the login page shows the wrong thing" report while building this.
+	 * One setting applying identically to everyone means the page can
+	 * always correctly show the right layout for it, with no identify
+	 * step needed, because there's nothing left for the page to get out
+	 * of sync with.
 	 */
 	public static function mode() {
-		return 'optional';
-	}
-
-	private static function mode_rank( $mode ) {
-		$ranks = array(
-			'optional' => 0,
-			'2fa'      => 1,
-			'required' => 2,
-		);
-		return $ranks[ $mode ] ?? 0;
+		$mode = get_option( 'thessley_passkey_mode', 'optional' );
+		return in_array( $mode, array( 'optional', '2fa', 'required' ), true ) ? $mode : 'optional';
 	}
 
 	private static function user_has_active_device( $user_id ) {
@@ -138,33 +124,9 @@ class Thessley_Module_Passkey_Login {
 		return false;
 	}
 
-	/**
-	 * The user's own preference, independent of whether the site floor
-	 * currently forces something stricter anyway. One of:
-	 *   'optional' — password alone is enough
-	 *   '2fa'      — password, then an app approval, both required
-	 *   'required' — password login refused outright, app only
-	 */
-	public static function user_preferred_mode( $user_id ) {
-		$mode = get_user_meta( $user_id, 'thessley_passkey_user_mode', true );
-		return in_array( $mode, array( 'optional', '2fa', 'required' ), true ) ? $mode : 'optional';
-	}
-
-	/**
-	 * What actually applies to this user right now. Strictness order is
-	 * optional < 2fa < required; the site floor can only push a user's
-	 * choice up this scale, never pull it back down — a user who opted
-	 * into 2fa or required keeps that even if the site default is
-	 * 'optional', but a site set to 'required' overrides everyone
-	 * regardless of their personal pick.
-	 */
+	/** What applies to this user right now: the site mode, unless they have no device yet — nothing to require without one, regardless of the setting. */
 	public static function effective_mode_for_user( $user_id ) {
-		if ( ! self::user_has_active_device( $user_id ) ) {
-			return 'optional'; // nothing to require yet, regardless of any setting
-		}
-		$site = self::mode();
-		$user = self::user_preferred_mode( $user_id );
-		return self::mode_rank( $site ) >= self::mode_rank( $user ) ? $site : $user;
+		return self::user_has_active_device( $user_id ) ? self::mode() : 'optional';
 	}
 
 	// --- Rewrite route: the human-facing fallback page -------------------
@@ -658,14 +620,12 @@ class Thessley_Module_Passkey_Login {
 
 	/**
 	 * One static screen per site mode, decided before anyone has typed
-	 * anything — no username-first step, no toggle to click:
+	 * anything — no username-first step, no toggle to click. There is no
+	 * per-account override to diverge from this: every account with a
+	 * device enrolled sees whichever of the three is live, identically.
 	 *  - optional: password form AND the QR shown together, QR already
 	 *              polling. Either one logs you in; whichever a visitor
-	 *              reaches for first works. This also happens to cover a
-	 *              user whose *personal* mode is stricter than this site
-	 *              default (effective_mode_for_user() can return '2fa' or
-	 *              'required' even on an 'optional' site) — the QR is
-	 *              already right there either way, nothing extra needed.
+	 *              reaches for first works.
 	 *  - 2fa:      password form only. The QR is deliberately not offered
 	 *              here at all — see rest_login_respond()'s docblock on
 	 *              why an anonymous app-only approval must never be
@@ -738,7 +698,11 @@ class Thessley_Module_Passkey_Login {
 			wp_die( 'Forbidden', 403 );
 		}
 
+		$posted = (string) ( $_POST['mode'] ?? '' );
+		$mode   = in_array( $posted, array( '2fa', 'required' ), true ) ? $posted : 'optional';
+
 		update_option( 'thessley_passkey_enabled', isset( $_POST['enabled'] ) );
+		update_option( 'thessley_passkey_mode', $mode );
 
 		wp_safe_redirect( add_query_arg( 'saved', '1', wp_get_referer() ) );
 		exit;
@@ -746,6 +710,7 @@ class Thessley_Module_Passkey_Login {
 
 	public static function render_page() {
 		$enabled = self::enabled();
+		$mode    = self::mode();
 
 		Thessley_UI::open( 'passkey-login' );
 
@@ -775,9 +740,19 @@ class Thessley_Module_Passkey_Login {
 					<?php
 				}
 			);
-			?>
-			<p class="description">Each account's login method (password, password + app, or app only) is set on that user's own profile page.</p>
-			<?php
+
+			Thessley_UI::row(
+				'Login method',
+				function () use ( $mode ) {
+					?>
+					<label><input type="radio" name="mode" value="optional" <?php checked( 'optional', $mode ); ?>> Password or the app — password form and QR shown together</label><br>
+					<label><input type="radio" name="mode" value="2fa" <?php checked( '2fa', $mode ); ?>> Password, then app — password first, the app confirms it afterward</label><br>
+					<label><input type="radio" name="mode" value="required" <?php checked( 'required', $mode ); ?>> App only — QR only, no password form</label>
+					<?php
+				},
+				'Applies to every account with a device enrolled. An account with no device yet always falls back to plain password — there is nothing to confirm with yet.'
+			);
+
 			submit_button( 'Save settings' );
 			?>
 		</form>
@@ -793,83 +768,10 @@ class Thessley_Module_Passkey_Login {
 			return;
 		}
 
-		$devices    = Thessley_Passkey_Store::devices_for_user( $user->ID );
-		$has_device = self::user_has_active_device( $user->ID );
-		$can_edit   = get_current_user_id() === (int) $user->ID || current_user_can( 'manage_options' );
+		$devices = Thessley_Passkey_Store::devices_for_user( $user->ID );
 		?>
 		<h2>Passkey devices</h2>
 		<table class="form-table">
-			<?php // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only result flag set only by this module's own admin-post redirect, which already check_admin_referer()'d before redirecting. ?>
-			<?php if ( isset( $_GET['thessley_pk_saved'] ) ) : ?>
-				<tr><td colspan="2"><div class="notice notice-success inline"><p>Login method updated.</p></div></td></tr>
-			<?php endif; ?>
-			<tr>
-				<th>Login method</th>
-				<td>
-					<?php
-					$preferred = self::user_preferred_mode( $user->ID );
-					$labels    = array(
-						'optional' => 'Password or the app',
-						'2fa'      => 'Password, then app confirmation',
-						'required' => 'App only — password login disabled',
-					);
-					?>
-					<?php if ( ! $has_device ) : ?>
-						<p class="description">Add a device below to choose how this account logs in.</p>
-					<?php elseif ( $can_edit ) : ?>
-						<div id="thessley-pk-mode-box">
-							<?php foreach ( $labels as $value => $label ) : ?>
-								<label><input type="radio" name="thessley_user_mode" value="<?php echo esc_attr( $value ); ?>" <?php checked( $value, $preferred ); ?>> <?php echo esc_html( $label ); ?></label><br>
-							<?php endforeach; ?>
-							<?php submit_button( 'Save', 'secondary', 'thessley-pk-mode-save', false, array( 'type' => 'button', 'style' => 'margin-top:8px' ) ); ?>
-							<p id="thessley-pk-mode-status" class="description"></p>
-						</div>
-						<script>
-						(function () {
-							// A plain <form> here would nest inside WordPress core's
-							// own #your-profile form (profile.php/user-edit.php wrap
-							// show_user_profile/edit_user_profile entirely inside it) —
-							// HTML doesn't allow nested forms, so the browser collapses
-							// them into one, and both forms' same-named _wpnonce fields
-							// collide: whichever value survives gets checked against
-							// the WRONG action, failing core's own profile-save nonce
-							// check with "Link expired". Submitting via fetch() instead
-							// avoids creating a second <form> at all.
-							var box = document.getElementById('thessley-pk-mode-box');
-							var btn = document.getElementById('thessley-pk-mode-save');
-							var status = document.getElementById('thessley-pk-mode-status');
-
-							btn.addEventListener('click', function () {
-								var mode = box.querySelector('input[name="thessley_user_mode"]:checked').value;
-								btn.disabled = true;
-								status.textContent = 'Saving…';
-
-								var body = new URLSearchParams({
-									action: 'thessley_pk_save_user_mode',
-									user_id: <?php echo (int) $user->ID; ?>,
-									user_mode: mode,
-									_wpnonce: <?php echo wp_json_encode( wp_create_nonce( 'thessley_pk_save_user_mode_' . $user->ID ) ); ?>,
-								});
-
-								fetch(<?php echo wp_json_encode( esc_url_raw( admin_url( 'admin-post.php' ) ) ); ?>, {
-									method: 'POST',
-									headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-									body: body,
-								}).then(function () {
-									status.textContent = 'Saved.';
-									btn.disabled = false;
-								}).catch(function () {
-									status.textContent = 'Something went wrong — try again.';
-									btn.disabled = false;
-								});
-							});
-						})();
-						</script>
-					<?php else : ?>
-						<p class="description"><?php echo esc_html( $labels[ $preferred ] ); ?></p>
-					<?php endif; ?>
-				</td>
-			</tr>
 			<tr>
 				<th>Enrolled devices</th>
 				<td>
@@ -991,31 +893,6 @@ class Thessley_Module_Passkey_Login {
 		thessley_log_event( 'passkey-login', 'device_revoked', 'noted', 'device #' . $id . ' for user #' . $target_user_id );
 
 		wp_safe_redirect( wp_get_referer() );
-		exit;
-	}
-
-	public static function handle_save_user_mode() {
-		$target_user_id = (int) ( $_POST['user_id'] ?? 0 );
-		check_admin_referer( 'thessley_pk_save_user_mode_' . $target_user_id );
-
-		if ( get_current_user_id() !== $target_user_id && ! current_user_can( 'manage_options' ) ) {
-			wp_die( 'Forbidden', 403 );
-		}
-
-		// A user with no active device can't meaningfully choose
-		// Neither 2fa nor required mean anything without a device to
-		// confirm with — there'd be nothing to log in with. Silently fall
-		// back to 'optional' rather than trusting a posted value for a
-		// state the UI never actually offers them.
-		$posted = (string) ( $_POST['user_mode'] ?? '' );
-		$mode   = ( self::user_has_active_device( $target_user_id ) && in_array( $posted, array( '2fa', 'required' ), true ) )
-			? $posted
-			: 'optional';
-
-		update_user_meta( $target_user_id, 'thessley_passkey_user_mode', $mode );
-		thessley_log_event( 'passkey-login', 'user_mode_changed', 'noted', 'user #' . $target_user_id . ' set to "' . $mode . '"' );
-
-		wp_safe_redirect( add_query_arg( 'thessley_pk_saved', '1', wp_get_referer() ) );
 		exit;
 	}
 
