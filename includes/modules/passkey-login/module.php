@@ -65,6 +65,16 @@ class Thessley_Module_Passkey_Login {
 		add_action( self::CRON_HOOK, array( Thessley_Passkey_Store::class, 'prune_expired_requests' ) );
 		add_action( 'admin_post_thessley_pk_save_settings', array( __CLASS__, 'handle_save_settings' ) );
 		add_action( 'admin_post_thessley_pk_revoke', array( __CLASS__, 'handle_revoke' ) );
+		add_action( 'admin_post_thessley_pk_save_user_mode', array( __CLASS__, 'handle_save_user_mode' ) );
+
+		if ( self::enabled() ) {
+			// Priority 30: after core's own username/password check (20)
+			// has already run and returned a real WP_User — same ordering
+			// Login Guard's lockout check uses, for the same reason: this
+			// only needs to act once we know the password was otherwise
+			// correct, not interfere with "wrong password" handling.
+			add_filter( 'authenticate', array( __CLASS__, 'maybe_block_password_login' ), 30, 1 );
+		}
 
 		add_action( 'init', array( __CLASS__, 'add_rewrite_rule' ) );
 		add_filter( 'query_vars', array( __CLASS__, 'add_query_vars' ) );
@@ -88,10 +98,41 @@ class Thessley_Module_Passkey_Login {
 		return (bool) get_option( 'thessley_passkey_enabled', false );
 	}
 
-	/** 'optional': password still works. 'required': password login is refused for any user with at least one active device. */
+	/**
+	 * Site-wide floor. 'optional': a user may still choose password-only
+	 * on their own profile. 'required': every user with an active device
+	 * is forced to passkey-only, regardless of their own profile choice
+	 * — the site setting can tighten what a user picked, never loosen it.
+	 */
 	public static function mode() {
 		$mode = get_option( 'thessley_passkey_mode', 'optional' );
 		return in_array( $mode, array( 'optional', 'required' ), true ) ? $mode : 'optional';
+	}
+
+	private static function user_has_active_device( $user_id ) {
+		foreach ( Thessley_Passkey_Store::devices_for_user( $user_id ) as $d ) {
+			if ( ! $d->revoked_at ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** The user's own preference, independent of whether the site floor currently forces it anyway. */
+	private static function user_prefers_app_only( $user_id ) {
+		return 'required' === get_user_meta( $user_id, 'thessley_passkey_user_mode', true );
+	}
+
+	/**
+	 * What actually applies to this user right now: the site floor can
+	 * only push this to 'required', never override a user's own choice
+	 * of 'required' down to 'optional'.
+	 */
+	public static function effective_mode_for_user( $user_id ) {
+		if ( ! self::user_has_active_device( $user_id ) ) {
+			return 'optional'; // nothing to require yet, regardless of any setting
+		}
+		return ( 'required' === self::mode() || self::user_prefers_app_only( $user_id ) ) ? 'required' : 'optional';
 	}
 
 	// --- Rewrite route: the human-facing fallback page -------------------
@@ -599,10 +640,37 @@ class Thessley_Module_Passkey_Login {
 			return;
 		}
 
-		$devices = Thessley_Passkey_Store::devices_for_user( $user->ID );
+		$devices    = Thessley_Passkey_Store::devices_for_user( $user->ID );
+		$has_device = self::user_has_active_device( $user->ID );
+		$can_edit   = get_current_user_id() === (int) $user->ID || current_user_can( 'manage_options' );
 		?>
 		<h2>Passkey devices</h2>
 		<table class="form-table">
+			<?php // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only result flag set only by this module's own admin-post redirect, which already check_admin_referer()'d before redirecting. ?>
+			<?php if ( isset( $_GET['thessley_pk_saved'] ) ) : ?>
+				<tr><td colspan="2"><div class="notice notice-success inline"><p>Login method updated.</p></div></td></tr>
+			<?php endif; ?>
+			<tr>
+				<th>Login method</th>
+				<td>
+					<?php if ( ! $has_device ) : ?>
+						<p class="description">Add a device below to choose how this account logs in.</p>
+					<?php elseif ( 'required' === self::mode() ) : ?>
+						<p class="description">Your site administrator requires the app for every account with a device enrolled — password login is disabled for you.</p>
+					<?php elseif ( $can_edit ) : ?>
+						<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+							<?php wp_nonce_field( 'thessley_pk_save_user_mode_' . $user->ID ); ?>
+							<input type="hidden" name="action" value="thessley_pk_save_user_mode">
+							<input type="hidden" name="user_id" value="<?php echo esc_attr( $user->ID ); ?>">
+							<label><input type="radio" name="user_mode" value="optional" <?php checked( ! self::user_prefers_app_only( $user->ID ) ); ?>> Password or the app</label><br>
+							<label><input type="radio" name="user_mode" value="required" <?php checked( self::user_prefers_app_only( $user->ID ) ); ?>> App only — disable password login for this account</label>
+							<?php submit_button( 'Save', 'secondary', 'submit', false, array( 'style' => 'margin-top:8px' ) ); ?>
+						</form>
+					<?php else : ?>
+						<p class="description"><?php echo self::user_prefers_app_only( $user->ID ) ? 'App only.' : 'Password or the app.'; ?></p>
+					<?php endif; ?>
+				</td>
+			</tr>
 			<tr>
 				<th>Enrolled devices</th>
 				<td>
@@ -706,5 +774,59 @@ class Thessley_Module_Passkey_Login {
 
 		wp_safe_redirect( wp_get_referer() );
 		exit;
+	}
+
+	public static function handle_save_user_mode() {
+		$target_user_id = (int) ( $_POST['user_id'] ?? 0 );
+		check_admin_referer( 'thessley_pk_save_user_mode_' . $target_user_id );
+
+		if ( get_current_user_id() !== $target_user_id && ! current_user_can( 'manage_options' ) ) {
+			wp_die( 'Forbidden', 403 );
+		}
+
+		// A user with no active device can't meaningfully choose
+		// app-only — there'd be nothing to log in with. Silently treat
+		// as 'optional' rather than trusting a posted value for a state
+		// the UI never actually offers them.
+		$mode = ( self::user_has_active_device( $target_user_id ) && isset( $_POST['user_mode'] ) && 'required' === $_POST['user_mode'] )
+			? 'required'
+			: 'optional';
+
+		update_user_meta( $target_user_id, 'thessley_passkey_user_mode', $mode );
+		thessley_log_event( 'passkey-login', 'user_mode_changed', 'noted', 'user #' . $target_user_id . ' set to "' . $mode . '"' );
+
+		wp_safe_redirect( add_query_arg( 'thessley_pk_saved', '1', wp_get_referer() ) );
+		exit;
+	}
+
+	/**
+	 * Runs after core's own 'authenticate' callback has already validated
+	 * the password (priority 20) and returned a real WP_User — this only
+	 * steps in once we know the password itself was correct, so a wrong
+	 * password still gets WordPress's normal "incorrect password" error
+	 * rather than this one.
+	 *
+	 * @param WP_User|WP_Error|null $user
+	 * @return WP_User|WP_Error|null
+	 */
+	public static function maybe_block_password_login( $user ) {
+		if ( ! ( $user instanceof WP_User ) ) {
+			return $user; // already an error (wrong password/unknown user), or no credentials submitted — nothing to do
+		}
+
+		if ( 'required' !== self::effective_mode_for_user( $user->ID ) ) {
+			return $user;
+		}
+
+		thessley_log_event( 'passkey-login', 'password_login_blocked', 'blocked', 'user #' . $user->ID . ' — passkey-only' );
+
+		return new WP_Error(
+			'thessley_passkey_required',
+			sprintf(
+				/* translators: %s: site name */
+				__( '<strong>Password login is disabled for this account.</strong> Use the %s app to log in.', 'thessley-security-hardening' ),
+				esc_html( get_bloginfo( 'name' ) )
+			)
+		);
 	}
 }
