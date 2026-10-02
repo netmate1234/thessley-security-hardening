@@ -306,16 +306,6 @@ class Thessley_Module_Passkey_Login {
 	public static function register_routes() {
 		register_rest_route(
 			'thessley/v1',
-			'/passkey/login/identify',
-			array(
-				'methods'             => 'POST',
-				'callback'            => array( __CLASS__, 'rest_login_identify' ),
-				'permission_callback' => '__return_true',
-			)
-		);
-
-		register_rest_route(
-			'thessley/v1',
 			'/passkey/login/start',
 			array(
 				'methods'             => 'POST',
@@ -390,31 +380,6 @@ class Thessley_Module_Passkey_Login {
 
 		set_transient( $key, $n + 1, self::RATE_LIMIT_WINDOW );
 		return false;
-	}
-
-	/**
-	 * What the login page needs to decide which screen to show, before
-	 * anyone has proven anything: does *this* account (if it exists) need
-	 * a password field, an app-confirmation hint, or no password field at
-	 * all. Deliberately returns 'optional' for an unknown username/email
-	 * rather than a distinct "not found" response — the whole point of
-	 * this endpoint is to avoid adding a new way to enumerate accounts,
-	 * so a typo and a real optional-mode account must look identical.
-	 */
-	public static function rest_login_identify( WP_REST_Request $req ) {
-		if ( self::rate_limited( 'login_identify' ) ) {
-			return new WP_Error( 'thessley_rate_limited', 'Too many requests.', array( 'status' => 429 ) );
-		}
-
-		$login = (string) $req->get_param( 'username' );
-		$user  = get_user_by( 'login', $login );
-		if ( ! $user ) {
-			$user = get_user_by( 'email', $login );
-		}
-
-		$mode = $user ? self::effective_mode_for_user( $user->ID ) : 'optional';
-
-		return rest_ensure_response( array( 'mode' => $mode ) );
 	}
 
 	public static function rest_login_start( WP_REST_Request $req ) {
@@ -662,28 +627,39 @@ class Thessley_Module_Passkey_Login {
 	}
 
 	/**
-	 * A per-user preference can be stricter than the site default (see
-	 * effective_mode_for_user()), and identity isn't known at page-load
-	 * time — so the page can't just pick one screen from the site setting
-	 * alone (that's what caused both the earlier lockout and the 2fa
-	 * bypass: client-side gating based only on the site default is either
-	 * wrong for some users, or has to be loose enough to be exploitable).
-	 * Instead: #loginform stays hidden behind a lightweight "who are you"
-	 * step first. Typing a username/email and continuing calls
-	 * rest_login_identify() to get *that account's* actual effective
-	 * mode, then reveals exactly the right thing — the password form
-	 * (optional/2fa) or the QR (required). A "skip, just use the app"
-	 * link stays available for anyone who'd rather not type anything —
-	 * safe to offer unconditionally because rest_login_respond() itself
-	 * (not this page) is what actually refuses to finish a login this way
-	 * for a 2fa-mode account; hiding the button here is convenience, not
-	 * the security boundary.
+	 * One static screen per site mode, decided before anyone has typed
+	 * anything — no username-first step, no toggle to click:
+	 *  - optional: password form AND the QR shown together, QR already
+	 *              polling. Either one logs you in; whichever a visitor
+	 *              reaches for first works. This also happens to cover a
+	 *              user whose *personal* mode is stricter than this site
+	 *              default (effective_mode_for_user() can return '2fa' or
+	 *              'required' even on an 'optional' site) — the QR is
+	 *              already right there either way, nothing extra needed.
+	 *  - 2fa:      password form only. The QR is deliberately not offered
+	 *              here at all — see rest_login_respond()'s docblock on
+	 *              why an anonymous app-only approval must never be
+	 *              enough to finish a login for a 2fa account. That
+	 *              enforcement lives server-side, not in this screen, but
+	 *              there's no reason to invite the attempt either.
+	 *  - required: QR only, already polling, password form hidden by CSS.
+	 *              Not removed outright — an account with no device yet
+	 *              still needs it, and identity isn't known at page-load
+	 *              time to tell those cases apart — so a small,
+	 *              de-emphasized "Use a password instead" link stays as a
+	 *              lockout escape hatch.
 	 */
 	public static function login_head_styles() {
-		echo '<style>#loginform{display:none}</style>';
+		if ( 'required' === self::mode() ) {
+			echo '<style>#loginform{display:none}</style>';
+		}
 	}
 
 	public static function login_page_assets() {
+		if ( '2fa' === self::mode() ) {
+			return; // password form only — see login_head_styles()'s docblock
+		}
+
 		wp_enqueue_script( 'thessley-qrcodejs', THESSLEY_PLUGIN_URL . 'assets/vendor/qrcode.min.js', array(), THESSLEY_VERSION, true );
 
 		wp_register_script( 'thessley-passkey-login', false, array( 'thessley-qrcodejs' ), THESSLEY_VERSION, true );
@@ -694,101 +670,49 @@ class Thessley_Module_Passkey_Login {
 		wp_add_inline_script(
 			'thessley-passkey-login',
 			"(function(){\n" .
-			"  var identifyBox = document.getElementById('thessley-identify-box');\n" .
-			"  var usernameEl = document.getElementById('thessley-identify-username');\n" .
-			"  var continueBtn = document.getElementById('thessley-identify-continue');\n" .
-			"  var skipLink = document.getElementById('thessley-identify-skip');\n" .
-			"  var backLink = document.getElementById('thessley-passkey-back');\n" .
 			"  var box = document.getElementById('thessley-passkey-box');\n" .
-			"  var statusEl = document.getElementById('thessley-passkey-status');\n" .
+			"  var pwToggle = document.getElementById('thessley-password-toggle');\n" .
 			"  var form = document.getElementById('loginform');\n" .
-			"  if (!identifyBox || !box || !form) return;\n" .
-			"  var started = false;\n" .
-			"  function startPolling() {\n" .
-			"    if (started) return;\n" .
-			"    started = true;\n" .
-			"    fetch('{$rest_base}/start', {method:'POST'}).then(function(r){return r.json();}).then(function(data){\n" .
-			"      new QRCode(document.getElementById('thessley-passkey-qr'), {text: data.app_link, width: 180, height: 180});\n" .
-			"      var linkEl = document.getElementById('thessley-passkey-link');\n" .
-			"      if (linkEl) { linkEl.href = data.app_link; }\n" .
-			"      var poll = setInterval(function(){\n" .
-			"        fetch('{$rest_base}/' + data.request_id + '/status').then(function(r){return r.json();}).then(function(s){\n" .
-			"          if (s.status === 'approved') { clearInterval(poll); window.location.href = s.redirect_to; }\n" .
-			"          if (s.status === 'denied' || s.status === 'expired') { clearInterval(poll); statusEl.textContent = 'Request ' + s.status + ' — refresh to try again.'; }\n" .
-			"        });\n" .
-			"      }, 1500);\n" .
-			"    });\n" .
-			"  }\n" .
-			"  function showQr() {\n" .
-			"    identifyBox.style.display = 'none';\n" .
-			"    box.style.display = 'block';\n" .
-			"    startPolling();\n" .
-			"  }\n" .
-			"  function showPassword(mode) {\n" .
-			"    identifyBox.style.display = 'none';\n" .
-			"    form.style.display = 'block';\n" .
-			"    var userField = document.getElementById('user_login');\n" .
-			"    if (userField) { userField.value = usernameEl.value; }\n" .
-			"    var passField = document.getElementById('user_pass');\n" .
-			"    if (passField) { passField.focus(); }\n" .
-			"    if (mode === '2fa') {\n" .
-			"      var hint = document.createElement('p');\n" .
-			"      hint.className = 'description';\n" .
-			"      hint.style.textAlign = 'center';\n" .
-			"      hint.textContent = \"You'll also need to confirm with the app after your password.\";\n" .
-			"      form.parentNode.insertBefore(hint, form.nextSibling);\n" .
-			"    }\n" .
-			"  }\n" .
-			"  function identify() {\n" .
-			"    continueBtn.disabled = true;\n" .
-			"    fetch('{$rest_base}/identify', {\n" .
-			"      method: 'POST',\n" .
-			"      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },\n" .
-			"      body: new URLSearchParams({ username: usernameEl.value }),\n" .
-			"    }).then(function (r) { return r.json(); }).then(function (data) {\n" .
-			"      continueBtn.disabled = false;\n" .
-			"      if (data.mode === 'required') { showQr(); } else { showPassword(data.mode); }\n" .
-			"    }).catch(function () { continueBtn.disabled = false; });\n" .
-			"  }\n" .
-			"  continueBtn.addEventListener('click', identify);\n" .
-			"  usernameEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); identify(); } });\n" .
-			"  if (skipLink) {\n" .
-			"    skipLink.addEventListener('click', function (e) { e.preventDefault(); showQr(); });\n" .
-			"  }\n" .
-			"  if (backLink) {\n" .
-			"    backLink.addEventListener('click', function (e) {\n" .
+			"  if (!box) return;\n" .
+			"  fetch('{$rest_base}/start', {method:'POST'}).then(function(r){return r.json();}).then(function(data){\n" .
+			"    new QRCode(document.getElementById('thessley-passkey-qr'), {text: data.app_link, width: 180, height: 180});\n" .
+			"    var linkEl = document.getElementById('thessley-passkey-link');\n" .
+			"    if (linkEl) { linkEl.href = data.app_link; }\n" .
+			"    var poll = setInterval(function(){\n" .
+			"      fetch('{$rest_base}/' + data.request_id + '/status').then(function(r){return r.json();}).then(function(s){\n" .
+			"        if (s.status === 'approved') { clearInterval(poll); window.location.href = s.redirect_to; }\n" .
+			"        if (s.status === 'denied' || s.status === 'expired') { clearInterval(poll); box.textContent = 'Request ' + s.status + ' — refresh to try again.'; }\n" .
+			"      });\n" .
+			"    }, 1500);\n" .
+			"  });\n" .
+			"  if (pwToggle && form) {\n" .
+			"    pwToggle.addEventListener('click', function (e) {\n" .
 			"      e.preventDefault();\n" .
+			"      form.style.display = 'block';\n" .
 			"      box.style.display = 'none';\n" .
-			"      identifyBox.style.display = 'block';\n" .
 			"    });\n" .
-			"  }\n" .
-			"  var existingUser = document.getElementById('user_login');\n" .
-			"  if (existingUser && existingUser.value) {\n" .
-			"    usernameEl.value = existingUser.value;\n" .
-			"    identify();\n" .
 			"  }\n" .
 			'})();'
 		);
 	}
 
-	/** Hooked to 'login_footer', not 'login_form' — 'login_form' fires inside the password <form>, which both looks wrong and risks the same nested-element problems invalid markup causes elsewhere in this module. See login_head_styles()'s docblock for why this is a username-first gate rather than a mode-keyed static screen. */
+	/** Hooked to 'login_footer', not 'login_form' — 'login_form' fires inside the password <form>, which both looks wrong and risks the same nested-element problems invalid markup causes elsewhere in this module. */
 	public static function login_form_markup() {
+		if ( '2fa' === self::mode() ) {
+			return;
+		}
+		$required = ( 'required' === self::mode() );
 		?>
-		<div id="thessley-identify-box" style="margin:16px 0;text-align:center">
-			<p>
-				<label for="thessley-identify-username">Username or Email Address</label><br>
-				<input type="text" id="thessley-identify-username" class="input" style="width:100%;max-width:280px" autocapitalize="off" autocomplete="username">
-			</p>
-			<p><button type="button" class="button button-primary" id="thessley-identify-continue">Continue</button></p>
-			<p style="font-size:12px"><a href="#" id="thessley-identify-skip">Skip, just use the <?php echo esc_html( get_bloginfo( 'name' ) ); ?> app</a></p>
-		</div>
-		<div id="thessley-passkey-box" style="display:none;margin:12px 0;padding:12px;border:1px solid #dcdcde;border-radius:4px;text-align:center">
+		<div id="thessley-passkey-box" style="margin:12px 0;padding:12px;border:1px solid #dcdcde;border-radius:4px;text-align:center">
 			<p class="description">Scan this code with the <?php echo esc_html( get_bloginfo( 'name' ) ); ?> app, or open it on this device.</p>
 			<div id="thessley-passkey-qr" style="display:inline-block;line-height:0"></div>
 			<p><a id="thessley-passkey-link" href="#">Open on this device</a></p>
-			<p id="thessley-passkey-status" style="color:#666"></p>
-			<p style="font-size:12px"><a href="#" id="thessley-passkey-back">Wrong account? Go back</a></p>
 		</div>
+		<?php if ( $required ) : ?>
+			<p style="text-align:center;font-size:12px">
+				<a href="#" id="thessley-password-toggle">Use a password instead</a>
+			</p>
+		<?php endif; ?>
 		<?php
 	}
 
