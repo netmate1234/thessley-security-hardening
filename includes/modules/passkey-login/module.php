@@ -219,6 +219,26 @@ class Thessley_Module_Passkey_Login {
 	}
 
 	/**
+	 * URL for the human-facing thessley-auth page (maybe_render_auth_page())
+	 * — built as a plain query string rather than the pretty
+	 * thessley-auth/{type}/{id}/ path the rewrite rule also accepts. A
+	 * site without a custom permalink structure never runs that rewrite
+	 * rule at all (same lesson already learned the hard way for the
+	 * Android app's own REST calls — see ApiClient.kt), so the pretty
+	 * form 404s there. The query-string form hits index.php directly and
+	 * works regardless of a site's permalink settings; add_query_vars()
+	 * registers these as real query vars either way, so
+	 * maybe_render_auth_page() needs no changes to accept both forms.
+	 * This matters most for the 2fa redirect: unlike login/enroll's `url`
+	 * field (a fallback shown only if the app fails to intercept the
+	 * app_link), the 2fa confirmation page has no other way to be
+	 * reached at all.
+	 */
+	private static function auth_url( $type, $request_id ) {
+		return home_url( '/?thessley_auth_type=' . $type . '&thessley_auth_id=' . rawurlencode( $request_id ) );
+	}
+
+	/**
 	 * Fallback page for the QR/link's https URL, for a human who opens it
 	 * some other way than the app's own scanner/tap handling (see the
 	 * docblock above this section).
@@ -391,7 +411,7 @@ class Thessley_Module_Passkey_Login {
 		}
 
 		$result             = Thessley_Passkey_Store::create_request( 'login', null, self::LOGIN_TTL );
-		$result['url']      = home_url( 'thessley-auth/login/' . $result['request_id'] . '/' );
+		$result['url']      = self::auth_url( 'login', $result['request_id'] );
 		$result['app_link'] = self::app_link( 'login', $result['request_id'], $result['nonce'] );
 
 		return rest_ensure_response( $result );
@@ -518,7 +538,7 @@ class Thessley_Module_Passkey_Login {
 		}
 
 		$result             = Thessley_Passkey_Store::create_request( 'enroll', get_current_user_id(), self::ENROLL_TTL );
-		$result['url']      = home_url( 'thessley-auth/enroll/' . $result['request_id'] . '/' );
+		$result['url']      = self::auth_url( 'enroll', $result['request_id'] );
 		$result['app_link'] = self::app_link( 'enroll', $result['request_id'], $result['nonce'] );
 
 		return rest_ensure_response( $result );
@@ -1090,7 +1110,7 @@ class Thessley_Module_Passkey_Login {
 
 		thessley_log_event( 'passkey-login', 'password_step_ok', 'noted', 'user #' . $user->ID . ' — awaiting app confirmation' );
 
-		wp_safe_redirect( home_url( 'thessley-auth/2fa/' . $result['request_id'] . '/' ) );
+		wp_safe_redirect( self::auth_url( '2fa', $result['request_id'] ) );
 		exit;
 	}
 }
