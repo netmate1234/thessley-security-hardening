@@ -275,6 +275,7 @@ class Thessley_Module_Login_Guard {
 		if ( is_string( $error ) && (
 			false !== strpos( $error, 'Too many failed login attempts' )
 			|| false !== strpos( $error, 'Password login is disabled for this account' )
+			|| false !== strpos( $error, 'requires app confirmation' )
 		) ) {
 			return $error;
 		}

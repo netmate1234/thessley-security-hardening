@@ -636,6 +636,10 @@ class Thessley_Module_Passkey_Login {
 	}
 
 	public static function login_page_assets() {
+		if ( '2fa' === self::mode() ) {
+			return; // see login_form_markup()'s docblock on why nothing renders here
+		}
+
 		wp_enqueue_script( 'thessley-qrcodejs', THESSLEY_PLUGIN_URL . 'assets/vendor/qrcode.min.js', array(), THESSLEY_VERSION, true );
 
 		wp_register_script( 'thessley-passkey-login', false, array( 'thessley-qrcodejs' ), THESSLEY_VERSION, true );
@@ -689,8 +693,29 @@ class Thessley_Module_Passkey_Login {
 		);
 	}
 
-	/** Hooked to 'login_footer', not 'login_form' — 'login_form' fires inside the password <form>, which both looks wrong and risks the same nested-element problems invalid markup causes elsewhere in this module. */
+	/**
+	 * Hooked to 'login_footer', not 'login_form' — 'login_form' fires
+	 * inside the password <form>, which both looks wrong and risks the
+	 * same nested-element problems invalid markup causes elsewhere in
+	 * this module.
+	 *
+	 * 2fa renders nothing at all here — a real security requirement, not
+	 * just a display choice. The anonymous QR/toggle path below (and
+	 * rest_login_status()'s handling of a plain 'login'-type request)
+	 * logs someone in on a device approval alone, with no password check
+	 * at all. For 'optional' and 'required' that's fine — either mode
+	 * already considers the app alone sufficient. For '2fa', whose entire
+	 * point is requiring *both* factors, offering that same password-free
+	 * path on the login page would let anyone holding the device skip the
+	 * password step completely, collapsing "password and app" down to
+	 * just "app" — a real bypass of what 2fa mode promises, not a cosmetic
+	 * issue. The actual 2fa app step still happens, just only ever after
+	 * maybe_block_password_login()'s post-password redirect, never before.
+	 */
 	public static function login_form_markup() {
+		if ( '2fa' === self::mode() ) {
+			return;
+		}
 		$required = ( 'required' === self::mode() );
 		?>
 		<?php if ( ! $required ) : ?>
@@ -1061,6 +1086,26 @@ class Thessley_Module_Passkey_Login {
 		// style identification model; a 2fa request is deliberately the
 		// opposite of that, since the password step already identified
 		// the user).
+		//
+		// The 'authenticate' filter also fires for XML-RPC and any other
+		// password-based login path, not just wp-login.php's own form —
+		// those callers expect a structured success/failure result, not
+		// an HTTP redirect, so only actually redirect when this really is
+		// the login form; everything else gets a plain rejection instead,
+		// same shape as 'required' mode's.
+		if ( 'wp-login.php' !== $GLOBALS['pagenow'] ) {
+			thessley_log_event( 'passkey-login', 'password_login_blocked', 'blocked', 'user #' . $user->ID . ' — 2fa required, non-browser login context' );
+
+			return new WP_Error(
+				'thessley_passkey_2fa_required',
+				sprintf(
+					/* translators: %s: site name */
+					__( '<strong>This account requires app confirmation.</strong> Log in through the website and use the %s app to finish.', 'thessley-security-hardening' ),
+					esc_html( get_bloginfo( 'name' ) )
+				)
+			);
+		}
+
 		$result = Thessley_Passkey_Store::create_request( '2fa', $user->ID, self::LOGIN_TTL );
 
 		thessley_log_event( 'passkey-login', 'password_step_ok', 'noted', 'user #' . $user->ID . ' — awaiting app confirmation' );
