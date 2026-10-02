@@ -821,8 +821,6 @@ class Thessley_Module_Passkey_Login {
 					?>
 					<?php if ( ! $has_device ) : ?>
 						<p class="description">Add a device below to choose how this account logs in.</p>
-					<?php elseif ( 'required' === self::mode() ) : ?>
-						<p class="description">Your site administrator requires the app for every account with a device enrolled — password login is disabled for you.</p>
 					<?php elseif ( $can_edit ) : ?>
 						<div id="thessley-pk-mode-box">
 							<?php foreach ( $labels as $value => $label ) : ?>
