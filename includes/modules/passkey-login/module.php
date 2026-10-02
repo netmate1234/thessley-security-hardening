@@ -662,12 +662,11 @@ class Thessley_Module_Passkey_Login {
 	 *              enough to finish a login for a 2fa account. That
 	 *              enforcement lives server-side, not in this screen, but
 	 *              there's no reason to invite the attempt either.
-	 *  - required: QR only, already polling, password form hidden by CSS.
-	 *              Not removed outright — an account with no device yet
-	 *              still needs it, and identity isn't known at page-load
-	 *              time to tell those cases apart — so a small,
-	 *              de-emphasized "Use a password instead" link stays as a
-	 *              lockout escape hatch.
+	 *  - required: QR only, already polling, password form hidden by CSS
+	 *              — nothing else on the page. An account with no device
+	 *              yet still technically needs a password to get in, with
+	 *              no UI route to it here; that's a deliberate choice by
+	 *              whoever sets this to 'required', not an oversight.
 	 */
 	public static function login_head_styles() {
 		if ( 'required' === self::mode() ) {
@@ -691,8 +690,6 @@ class Thessley_Module_Passkey_Login {
 			'thessley-passkey-login',
 			"(function(){\n" .
 			"  var box = document.getElementById('thessley-passkey-box');\n" .
-			"  var pwToggle = document.getElementById('thessley-password-toggle');\n" .
-			"  var form = document.getElementById('loginform');\n" .
 			"  if (!box) return;\n" .
 			"  fetch('{$rest_base}/start', {method:'POST'}).then(function(r){return r.json();}).then(function(data){\n" .
 			"    new QRCode(document.getElementById('thessley-passkey-qr'), {text: data.app_link, width: 180, height: 180});\n" .
@@ -705,13 +702,6 @@ class Thessley_Module_Passkey_Login {
 			"      });\n" .
 			"    }, 1500);\n" .
 			"  });\n" .
-			"  if (pwToggle && form) {\n" .
-			"    pwToggle.addEventListener('click', function (e) {\n" .
-			"      e.preventDefault();\n" .
-			"      form.style.display = 'block';\n" .
-			"      box.style.display = 'none';\n" .
-			"    });\n" .
-			"  }\n" .
 			'})();'
 		);
 	}
@@ -721,18 +711,12 @@ class Thessley_Module_Passkey_Login {
 		if ( '2fa' === self::mode() ) {
 			return;
 		}
-		$required = ( 'required' === self::mode() );
 		?>
 		<div id="thessley-passkey-box" style="margin:12px 0;padding:12px;border:1px solid #dcdcde;border-radius:4px;text-align:center">
 			<p class="description">Scan this code with the <?php echo esc_html( get_bloginfo( 'name' ) ); ?> app, or open it on this device.</p>
 			<div id="thessley-passkey-qr" style="display:inline-block;line-height:0"></div>
 			<p><a id="thessley-passkey-link" href="#">Open on this device</a></p>
 		</div>
-		<?php if ( $required ) : ?>
-			<p style="text-align:center;font-size:12px">
-				<a href="#" id="thessley-password-toggle">Use a password instead</a>
-			</p>
-		<?php endif; ?>
 		<?php
 	}
 
