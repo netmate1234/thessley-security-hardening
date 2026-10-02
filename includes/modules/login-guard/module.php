@@ -267,8 +267,15 @@ class Thessley_Module_Login_Guard {
 	 * message so a brute-forcer can't enumerate valid users for free.
 	 */
 	public static function genericize_errors( $error ) {
-		// Don't mask our own lockout message — the user needs to know why.
-		if ( is_string( $error ) && false !== strpos( $error, 'Too many failed login attempts' ) ) {
+		// Don't mask our own lockout message, or Passkey Login's "use the
+		// app instead" message — a user told their password is "invalid"
+		// when it was actually correct (just refused by that module's
+		// required/2fa mode) would have no way to know what's really
+		// going on.
+		if ( is_string( $error ) && (
+			false !== strpos( $error, 'Too many failed login attempts' )
+			|| false !== strpos( $error, 'Password login is disabled for this account' )
+		) ) {
 			return $error;
 		}
 		return __( '<strong>Error:</strong> Invalid username, email address or password.', 'thessley-security-hardening' );
