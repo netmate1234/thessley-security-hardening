@@ -94,8 +94,9 @@ class Thessley_Module_Passkey_Login {
 		return __CLASS__;
 	}
 
+	/** No separate on/off switch — the three-way "Login method" setting is the only control; 'optional' is the no-op state. */
 	public static function enabled() {
-		return (bool) get_option( 'thessley_passkey_enabled', false );
+		return true;
 	}
 
 	/**
@@ -701,7 +702,6 @@ class Thessley_Module_Passkey_Login {
 		$posted = (string) ( $_POST['mode'] ?? '' );
 		$mode   = in_array( $posted, array( '2fa', 'required' ), true ) ? $posted : 'optional';
 
-		update_option( 'thessley_passkey_enabled', isset( $_POST['enabled'] ) );
 		update_option( 'thessley_passkey_mode', $mode );
 
 		wp_safe_redirect( add_query_arg( 'saved', '1', wp_get_referer() ) );
@@ -709,8 +709,7 @@ class Thessley_Module_Passkey_Login {
 	}
 
 	public static function render_page() {
-		$enabled = self::enabled();
-		$mode    = self::mode();
+		$mode = self::mode();
 
 		Thessley_UI::open( 'passkey-login' );
 
@@ -732,15 +731,6 @@ class Thessley_Module_Passkey_Login {
 			<input type="hidden" name="action" value="thessley_pk_save_settings">
 
 			<?php
-			Thessley_UI::row(
-				'Enabled',
-				function () use ( $enabled ) {
-					?>
-					<label><input type="checkbox" name="enabled" <?php checked( $enabled ); ?>> Allow passwordless login via the app</label>
-					<?php
-				}
-			);
-
 			Thessley_UI::row(
 				'Login method',
 				function () use ( $mode ) {
