@@ -628,9 +628,49 @@ class Thessley_Module_Passkey_Login {
 					<?php endif; ?>
 
 					<?php if ( get_current_user_id() === (int) $user->ID ) : ?>
-						<p class="description" style="margin-top:10px">
-							Adding a device from this page isn't wired up yet in this scaffold (needs the same QR-rendering follow-up noted on the Passkey Login settings page).
+						<div id="thessley-pk-enroll-box" style="margin-top:14px">
+							<button type="button" class="button" id="thessley-pk-enroll-start">Add a device</button>
+							<p id="thessley-pk-enroll-status" class="description" style="margin-top:8px"></p>
+						</div>
+						<p class="description" style="margin-top:4px">
+							QR image rendering isn't wired up yet in this scaffold — open the link on the same device you're enrolling, or copy it to the device's browser.
 						</p>
+						<script>
+						(function(){
+							var btn = document.getElementById('thessley-pk-enroll-start');
+							var status = document.getElementById('thessley-pk-enroll-status');
+							var restBase = <?php echo wp_json_encode( esc_url_raw( rest_url( 'thessley/v1/passkey/enroll' ) ) ); ?>;
+							var nonce = <?php echo wp_json_encode( wp_create_nonce( 'wp_rest' ) ); ?>;
+
+							btn.addEventListener('click', function () {
+								btn.disabled = true;
+								status.textContent = 'Starting…';
+
+								fetch(restBase + '/start', {
+									method: 'POST',
+									headers: { 'X-WP-Nonce': nonce },
+								}).then(function (r) { return r.json(); }).then(function (data) {
+									status.innerHTML = 'Open on the device you want to enroll: <a href="' + data.app_link + '">' + data.app_link + '</a>';
+
+									var poll = setInterval(function () {
+										fetch(restBase + '/' + data.request_id + '/status', {
+											headers: { 'X-WP-Nonce': nonce },
+										}).then(function (r) { return r.json(); }).then(function (s) {
+											if (s.status === 'approved') {
+												clearInterval(poll);
+												status.textContent = 'Added "' + (s.label || 'device') + '". Reload this page to see it in the list.';
+												btn.disabled = false;
+											} else if (s.status === 'expired') {
+												clearInterval(poll);
+												status.textContent = 'Request expired — try again.';
+												btn.disabled = false;
+											}
+										});
+									}, 1500);
+								});
+							});
+						})();
+						</script>
 					<?php endif; ?>
 				</td>
 			</tr>
