@@ -887,17 +887,18 @@ class Thessley_Module_Passkey_Login {
 					<?php endif; ?>
 
 					<?php if ( get_current_user_id() === (int) $user->ID ) : ?>
-						<div id="thessley-pk-enroll-box" style="margin-top:14px">
-							<button type="button" class="button" id="thessley-pk-enroll-start">Add a device</button>
-							<div id="thessley-pk-enroll-qr" style="display:none;margin-top:10px;line-height:0"></div>
-							<p id="thessley-pk-enroll-status" class="description" style="margin-top:8px"></p>
+						<div class="thessley">
+						<div id="thessley-pk-enroll-box" style="margin-top:14px;max-width:300px;padding:20px;border:1px solid #dcdcde;border-radius:6px;background:#fff;text-align:center">
+							<p id="thessley-pk-enroll-hint" class="description" style="margin:0 0 14px">Add a new device to sign in without a password.</p>
+							<button type="button" class="button button-primary" id="thessley-pk-enroll-start">Add a device</button>
+							<div id="thessley-pk-enroll-qr" style="display:none;margin:16px auto 0;line-height:0"></div>
+							<p id="thessley-pk-enroll-status" class="description" style="margin-top:12px;word-break:break-all"></p>
 						</div>
-						<p class="description" style="margin-top:4px">
-							Scan the code with the device you're enrolling, or open the link on that same device.
-						</p>
+						</div>
 						<script>
 						(function(){
 							var btn = document.getElementById('thessley-pk-enroll-start');
+							var hint = document.getElementById('thessley-pk-enroll-hint');
 							var status = document.getElementById('thessley-pk-enroll-status');
 							var qrBox = document.getElementById('thessley-pk-enroll-qr');
 							var restBase = <?php echo wp_json_encode( esc_url_raw( rest_url( 'thessley/v1/passkey/enroll' ) ) ); ?>;
@@ -905,16 +906,18 @@ class Thessley_Module_Passkey_Login {
 
 							btn.addEventListener('click', function () {
 								btn.disabled = true;
-								status.textContent = 'Starting…';
+								hint.textContent = 'Starting…';
 
 								fetch(restBase + '/start', {
 									method: 'POST',
 									headers: { 'X-WP-Nonce': nonce },
 								}).then(function (r) { return r.json(); }).then(function (data) {
-									qrBox.style.display = 'block';
+									btn.style.display = 'none';
+									hint.textContent = "Scan this with the device you're enrolling, or tap the link below on that same device.";
+									qrBox.style.display = 'inline-block';
 									qrBox.innerHTML = '';
-									new QRCode(qrBox, { text: data.app_link, width: 160, height: 160 });
-									status.innerHTML = 'Or open on the device you want to enroll: <a href="' + data.app_link + '">' + data.app_link + '</a>';
+									new QRCode(qrBox, { text: data.app_link, width: 180, height: 180 });
+									status.innerHTML = '<a href="' + data.app_link + '">Open on this device</a>';
 
 									var poll = setInterval(function () {
 										fetch(restBase + '/' + data.request_id + '/status', {
@@ -922,11 +925,15 @@ class Thessley_Module_Passkey_Login {
 										}).then(function (r) { return r.json(); }).then(function (s) {
 											if (s.status === 'approved') {
 												clearInterval(poll);
-												status.textContent = 'Added "' + (s.label || 'device') + '". Reload this page to see it in the list.';
-												btn.disabled = false;
+												qrBox.style.display = 'none';
+												hint.textContent = 'Added "' + (s.label || 'device') + '". Reload this page to see it in the list.';
+												status.textContent = '';
 											} else if (s.status === 'expired') {
 												clearInterval(poll);
-												status.textContent = 'Request expired — try again.';
+												qrBox.style.display = 'none';
+												hint.textContent = 'Request expired — try again.';
+												status.textContent = '';
+												btn.style.display = 'inline-block';
 												btn.disabled = false;
 											}
 										});
