@@ -912,6 +912,12 @@ class Thessley_Module_Passkey_Login {
 									method: 'POST',
 									headers: { 'X-WP-Nonce': nonce },
 								}).then(function (r) { return r.json(); }).then(function (data) {
+									if (!data || !data.app_link) {
+										hint.textContent = 'Could not start enrollment: ' + (data && data.message ? data.message : 'no response from the server.');
+										btn.disabled = false;
+										return;
+									}
+
 									btn.style.display = 'none';
 									hint.textContent = "Scan this with the device you're enrolling, or tap the link below on that same device.";
 									qrBox.style.display = 'inline-block';
@@ -938,6 +944,9 @@ class Thessley_Module_Passkey_Login {
 											}
 										});
 									}, 1500);
+								}).catch(function (err) {
+									hint.textContent = 'Network error starting enrollment: ' + err.message;
+									btn.disabled = false;
 								});
 							});
 						})();
