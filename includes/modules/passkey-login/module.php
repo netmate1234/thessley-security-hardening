@@ -671,6 +671,11 @@ class Thessley_Module_Passkey_Login {
 			return;
 		}
 		wp_enqueue_script( 'thessley-qrcodejs', THESSLEY_PLUGIN_URL . 'assets/vendor/qrcode.min.js', array(), THESSLEY_VERSION, true );
+		// Pulled in here too (normally only loaded on the plugin's own
+		// wp-thessley-* pages) so the device list below can use the same
+		// Thessley_UI::badge() house style as the rest of the plugin
+		// instead of plain table text.
+		wp_enqueue_style( 'thessley-admin', THESSLEY_PLUGIN_URL . 'assets/admin.css', array(), THESSLEY_VERSION );
 	}
 
 	/**
@@ -822,23 +827,28 @@ class Thessley_Module_Passkey_Login {
 					<?php if ( empty( $devices ) ) : ?>
 						<p class="description">No devices enrolled yet.</p>
 					<?php else : ?>
-						<table class="widefat" style="max-width:600px">
+						<div class="thessley">
+						<table class="widefat thessley-pk-devices" style="max-width:680px">
 							<thead><tr><th>Label</th><th>Added</th><th>Last used</th><th>Status</th><th>Key</th><th></th></tr></thead>
 							<tbody>
 							<?php
-							$attestation_labels = array(
-								'strongbox' => 'StrongBox hardware',
-								'tee'       => 'TEE hardware',
-								'software'  => 'Software (not hardware-backed)',
+							// [tone, dashicon, label] — tone feeds Thessley_UI::badge()'s
+							// existing good/warn/bad/quiet palette, same as every other
+							// module's status badges.
+							$attestation_meta = array(
+								'strongbox' => array( 'good', 'shield', 'StrongBox hardware' ),
+								'tee'       => array( 'good', 'lock', 'TEE hardware' ),
+								'software'  => array( 'warn', 'shield-alt', 'Software only' ),
 							);
 							?>
 							<?php foreach ( $devices as $d ) : ?>
+								<?php list( $att_tone, $att_icon, $att_label ) = $attestation_meta[ $d->attestation_level ?? '' ] ?? array( 'quiet', 'editor-help', 'Unverified' ); ?>
 								<tr>
 									<td><?php echo esc_html( $d->label ?: 'Unnamed device' ); ?></td>
 									<td><?php echo esc_html( mysql2date( 'M j, Y', $d->created_at ) ); ?></td>
 									<td><?php echo $d->last_used_at ? esc_html( mysql2date( 'M j, Y H:i', $d->last_used_at ) ) : '—'; ?></td>
-									<td><?php echo $d->revoked_at ? 'Revoked' : 'Active'; ?></td>
-									<td><?php echo esc_html( $attestation_labels[ $d->attestation_level ?? '' ] ?? 'Unverified' ); ?></td>
+									<td><?php Thessley_UI::badge( $d->revoked_at ? 'Revoked' : 'Active', $d->revoked_at ? 'bad' : 'good', $d->revoked_at ? 'dismiss' : 'yes-alt' ); ?></td>
+									<td><?php Thessley_UI::badge( $att_label, $att_tone, $att_icon ); ?></td>
 									<td>
 										<?php if ( ! $d->revoked_at && ( get_current_user_id() === (int) $user->ID || current_user_can( 'manage_options' ) ) ) : ?>
 											<?php // No <form> here — see the Login method script's comment on why nested forms inside profile.php/user-edit.php break WordPress core's own nonce check. ?>
@@ -852,6 +862,7 @@ class Thessley_Module_Passkey_Login {
 							<?php endforeach; ?>
 							</tbody>
 						</table>
+						</div>
 						<script>
 						(function () {
 							document.querySelectorAll('.thessley-pk-revoke-btn').forEach(function (btn) {
