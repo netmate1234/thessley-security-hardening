@@ -835,24 +835,19 @@ class Thessley_Module_Passkey_Login {
 		}
 		?>
 		<h2>Passkey devices</h2>
-		<table class="form-table">
-			<tr>
-				<th>Enrolled devices</th>
-				<td>
-					<div id="thessley-pk-devices-wrap"><?php echo self::render_devices_list_html( $user ); ?></div>
+		<div class="thessley" style="margin-bottom:20px">
+			<div id="thessley-pk-devices-wrap"><?php echo self::render_devices_list_html( $user ); ?></div>
 
-					<?php if ( get_current_user_id() === (int) $user->ID ) : ?>
-						<div class="thessley">
-						<div id="thessley-pk-enroll-box" style="margin-top:14px;max-width:300px;padding:20px;border:1px solid #dcdcde;border-radius:6px;background:#fff;text-align:center">
-							<p id="thessley-pk-enroll-hint" class="description" style="margin:0 0 14px">Add a new device to sign in without a password.</p>
-							<button type="button" class="button button-primary" id="thessley-pk-enroll-start">Add a device</button>
-							<div id="thessley-pk-enroll-qr" style="display:none;margin:16px auto 0;line-height:0"></div>
-							<p id="thessley-pk-enroll-status" class="description" style="margin-top:12px;word-break:break-all"></p>
-						</div>
-						</div>
-					<?php endif; ?>
+			<?php if ( get_current_user_id() === (int) $user->ID ) : ?>
+				<div id="thessley-pk-enroll-box" style="margin-top:16px;max-width:300px;padding:20px;border:1px solid #dcdcde;border-radius:6px;background:#fff;text-align:center">
+					<p id="thessley-pk-enroll-hint" class="description" style="margin:0 0 14px">Add a new device to sign in without a password.</p>
+					<button type="button" class="button button-primary" id="thessley-pk-enroll-start">Add a device</button>
+					<div id="thessley-pk-enroll-qr" style="display:none;margin:16px auto 0;line-height:0"></div>
+					<p id="thessley-pk-enroll-status" class="description" style="margin-top:12px;word-break:break-all"></p>
+				</div>
+			<?php endif; ?>
 
-					<script>
+			<script>
 					(function () {
 						var wrap = document.getElementById('thessley-pk-devices-wrap');
 						var devicesEndpoint = <?php echo wp_json_encode( esc_url_raw( rest_url( 'thessley/v1/passkey/devices' ) ) ); ?>;
@@ -946,11 +941,9 @@ class Thessley_Module_Passkey_Login {
 							});
 						})();
 						<?php endif; ?>
-					})();
-					</script>
-				</td>
-			</tr>
-		</table>
+				})();
+				</script>
+		</div>
 		<?php
 	}
 
@@ -966,8 +959,8 @@ class Thessley_Module_Passkey_Login {
 		else :
 			?>
 			<div class="thessley">
-			<table class="widefat thessley-pk-devices" style="max-width:680px">
-				<thead><tr><th>Label</th><th>Added</th><th>Last used</th><th>Status</th><th>Key</th><th></th></tr></thead>
+			<table class="widefat striped thessley-pk-devices" style="max-width:680px">
+				<thead><tr><th>Label</th><th>Added</th><th>Last used</th><th>Status</th><th>Security</th><th></th></tr></thead>
 				<tbody>
 				<?php
 				// [tone, dashicon, label] — tone feeds Thessley_UI::badge()'s
