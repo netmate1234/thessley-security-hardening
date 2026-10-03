@@ -794,12 +794,6 @@ class Thessley_Module_Passkey_Login {
 			Thessley_UI::notice( 'success', 'Settings saved.' );
 		}
 
-		Thessley_UI::notice(
-			'info',
-			'The server-side protocol, REST endpoints, device storage, signature verification, and QR rendering are all in place. The companion Android app is a separate project — see this module\'s docblock.',
-			true
-		);
-
 		Thessley_UI::section( 'Settings', 'admin-generic' );
 		?>
 		<form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
