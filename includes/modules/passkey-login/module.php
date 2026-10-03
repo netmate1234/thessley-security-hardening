@@ -342,6 +342,18 @@ class Thessley_Module_Passkey_Login {
 
 		register_rest_route(
 			'thessley/v1',
+			'/passkey/devices',
+			array(
+				'methods'             => 'GET',
+				'callback'            => array( __CLASS__, 'rest_devices_html' ),
+				'permission_callback' => function () {
+					return is_user_logged_in();
+				},
+			)
+		);
+
+		register_rest_route(
+			'thessley/v1',
 			'/passkey/enroll/(?P<id>[\w-]+)/status',
 			array(
 				'methods'             => 'GET',
@@ -516,6 +528,11 @@ class Thessley_Module_Passkey_Login {
 		$result['app_link'] = self::app_link( 'enroll', $result['request_id'], $result['nonce'] );
 
 		return rest_ensure_response( $result );
+	}
+
+	/** Backs the profile page's live refresh after an enroll/revoke, so the device list updates without a full page reload. */
+	public static function rest_devices_html( WP_REST_Request $req ) {
+		return rest_ensure_response( array( 'html' => self::render_devices_list_html( wp_get_current_user() ) ) );
 	}
 
 	public static function rest_enroll_status( WP_REST_Request $req ) {
@@ -816,75 +833,13 @@ class Thessley_Module_Passkey_Login {
 		if ( ! self::enabled() ) {
 			return;
 		}
-
-		$devices = Thessley_Passkey_Store::devices_for_user( $user->ID );
 		?>
 		<h2>Passkey devices</h2>
 		<table class="form-table">
 			<tr>
 				<th>Enrolled devices</th>
 				<td>
-					<?php if ( empty( $devices ) ) : ?>
-						<p class="description">No devices enrolled yet.</p>
-					<?php else : ?>
-						<div class="thessley">
-						<table class="widefat thessley-pk-devices" style="max-width:680px">
-							<thead><tr><th>Label</th><th>Added</th><th>Last used</th><th>Status</th><th>Key</th><th></th></tr></thead>
-							<tbody>
-							<?php
-							// [tone, dashicon, label] — tone feeds Thessley_UI::badge()'s
-							// existing good/warn/bad/quiet palette, same as every other
-							// module's status badges.
-							$attestation_meta = array(
-								'strongbox' => array( 'good', 'shield', 'StrongBox hardware' ),
-								'tee'       => array( 'good', 'lock', 'TEE hardware' ),
-								'software'  => array( 'warn', 'shield-alt', 'Software only' ),
-							);
-							?>
-							<?php foreach ( $devices as $d ) : ?>
-								<?php list( $att_tone, $att_icon, $att_label ) = $attestation_meta[ $d->attestation_level ?? '' ] ?? array( 'quiet', 'editor-help', 'Unverified' ); ?>
-								<tr>
-									<td><?php echo esc_html( $d->label ?: 'Unnamed device' ); ?></td>
-									<td><?php echo esc_html( mysql2date( 'M j, Y', $d->created_at ) ); ?></td>
-									<td><?php echo $d->last_used_at ? esc_html( mysql2date( 'M j, Y H:i', $d->last_used_at ) ) : '—'; ?></td>
-									<td><?php Thessley_UI::badge( $d->revoked_at ? 'Revoked' : 'Active', $d->revoked_at ? 'bad' : 'good', $d->revoked_at ? 'dismiss' : 'yes-alt' ); ?></td>
-									<td><?php Thessley_UI::badge( $att_label, $att_tone, $att_icon ); ?></td>
-									<td>
-										<?php if ( ! $d->revoked_at && ( get_current_user_id() === (int) $user->ID || current_user_can( 'manage_options' ) ) ) : ?>
-											<?php // No <form> here — see the Login method script's comment on why nested forms inside profile.php/user-edit.php break WordPress core's own nonce check. ?>
-											<button type="button" class="button button-small thessley-pk-revoke-btn"
-												data-id="<?php echo esc_attr( $d->id ); ?>"
-												data-user-id="<?php echo esc_attr( $user->ID ); ?>"
-												data-nonce="<?php echo esc_attr( wp_create_nonce( 'thessley_pk_revoke_' . $d->id ) ); ?>">Revoke</button>
-										<?php endif; ?>
-									</td>
-								</tr>
-							<?php endforeach; ?>
-							</tbody>
-						</table>
-						</div>
-						<script>
-						(function () {
-							document.querySelectorAll('.thessley-pk-revoke-btn').forEach(function (btn) {
-								btn.addEventListener('click', function () {
-									btn.disabled = true;
-									var body = new URLSearchParams({
-										action: 'thessley_pk_revoke',
-										id: btn.dataset.id,
-										user_id: btn.dataset.userId,
-										_wpnonce: btn.dataset.nonce,
-									});
-									fetch(<?php echo wp_json_encode( esc_url_raw( admin_url( 'admin-post.php' ) ) ); ?>, {
-										method: 'POST',
-										headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-										body: body,
-									}).then(function () { window.location.reload(); })
-									  .catch(function () { btn.disabled = false; });
-								});
-							});
-						})();
-						</script>
-					<?php endif; ?>
+					<div id="thessley-pk-devices-wrap"><?php echo self::render_devices_list_html( $user ); ?></div>
 
 					<?php if ( get_current_user_id() === (int) $user->ID ) : ?>
 						<div class="thessley">
@@ -895,14 +850,53 @@ class Thessley_Module_Passkey_Login {
 							<p id="thessley-pk-enroll-status" class="description" style="margin-top:12px;word-break:break-all"></p>
 						</div>
 						</div>
-						<script>
-						(function(){
+					<?php endif; ?>
+
+					<script>
+					(function () {
+						var wrap = document.getElementById('thessley-pk-devices-wrap');
+						var devicesEndpoint = <?php echo wp_json_encode( esc_url_raw( rest_url( 'thessley/v1/passkey/devices' ) ) ); ?>;
+						var restNonce = <?php echo wp_json_encode( wp_create_nonce( 'wp_rest' ) ); ?>;
+
+						// Shared by both revoke (below) and enroll-approved (further
+						// below) — re-fetches just the device table's markup and
+						// swaps it in, so neither action needs a full page reload.
+						function refreshDevices() {
+							return fetch(devicesEndpoint, { headers: { 'X-WP-Nonce': restNonce } })
+								.then(function (r) { return r.json(); })
+								.then(function (data) { if ( data && data.html != null ) { wrap.innerHTML = data.html; } });
+						}
+
+						// Delegated on #thessley-pk-devices-wrap itself (which
+						// survives refreshDevices()'s innerHTML swap) rather than
+						// bound per-button, since the buttons it's listening for
+						// get replaced wholesale on every refresh.
+						wrap.addEventListener('click', function (e) {
+							var btn = e.target.closest('.thessley-pk-revoke-btn');
+							if ( ! btn ) {
+								return;
+							}
+							btn.disabled = true;
+							var body = new URLSearchParams({
+								action: 'thessley_pk_revoke',
+								id: btn.dataset.id,
+								user_id: btn.dataset.userId,
+								_wpnonce: btn.dataset.nonce,
+							});
+							fetch(<?php echo wp_json_encode( esc_url_raw( admin_url( 'admin-post.php' ) ) ); ?>, {
+								method: 'POST',
+								headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+								body: body,
+							}).then(refreshDevices).catch(function () { btn.disabled = false; });
+						});
+
+						<?php if ( get_current_user_id() === (int) $user->ID ) : ?>
+						(function () {
 							var btn = document.getElementById('thessley-pk-enroll-start');
 							var hint = document.getElementById('thessley-pk-enroll-hint');
 							var status = document.getElementById('thessley-pk-enroll-status');
 							var qrBox = document.getElementById('thessley-pk-enroll-qr');
 							var restBase = <?php echo wp_json_encode( esc_url_raw( rest_url( 'thessley/v1/passkey/enroll' ) ) ); ?>;
-							var nonce = <?php echo wp_json_encode( wp_create_nonce( 'wp_rest' ) ); ?>;
 
 							btn.addEventListener('click', function () {
 								btn.disabled = true;
@@ -910,7 +904,7 @@ class Thessley_Module_Passkey_Login {
 
 								fetch(restBase + '/start', {
 									method: 'POST',
-									headers: { 'X-WP-Nonce': nonce },
+									headers: { 'X-WP-Nonce': restNonce },
 								}).then(function (r) { return r.json(); }).then(function (data) {
 									if (!data || !data.app_link) {
 										hint.textContent = 'Could not start enrollment: ' + (data && data.message ? data.message : 'no response from the server.');
@@ -927,13 +921,14 @@ class Thessley_Module_Passkey_Login {
 
 									var poll = setInterval(function () {
 										fetch(restBase + '/' + data.request_id + '/status', {
-											headers: { 'X-WP-Nonce': nonce },
+											headers: { 'X-WP-Nonce': restNonce },
 										}).then(function (r) { return r.json(); }).then(function (s) {
 											if (s.status === 'approved') {
 												clearInterval(poll);
 												qrBox.style.display = 'none';
-												hint.textContent = 'Added "' + (s.label || 'device') + '". Reload this page to see it in the list.';
 												status.textContent = '';
+												hint.textContent = 'Added "' + (s.label || 'device') + '".';
+												refreshDevices();
 											} else if (s.status === 'expired') {
 												clearInterval(poll);
 												qrBox.style.display = 'none';
@@ -950,13 +945,67 @@ class Thessley_Module_Passkey_Login {
 								});
 							});
 						})();
-						</script>
-					<?php endif; ?>
+						<?php endif; ?>
+					})();
+					</script>
 				</td>
 			</tr>
 		</table>
 		<?php
 	}
+
+	/** Renders just the device table (or the empty-state message) — shared by the initial profile-page render and the /passkey/devices refresh endpoint so both stay pixel-identical. */
+	private static function render_devices_list_html( $user ) {
+		$devices = Thessley_Passkey_Store::devices_for_user( $user->ID );
+
+		ob_start();
+		if ( empty( $devices ) ) :
+			?>
+			<p class="description">No devices enrolled yet.</p>
+			<?php
+		else :
+			?>
+			<div class="thessley">
+			<table class="widefat thessley-pk-devices" style="max-width:680px">
+				<thead><tr><th>Label</th><th>Added</th><th>Last used</th><th>Status</th><th>Key</th><th></th></tr></thead>
+				<tbody>
+				<?php
+				// [tone, dashicon, label] — tone feeds Thessley_UI::badge()'s
+				// existing good/warn/bad/quiet palette, same as every other
+				// module's status badges.
+				$attestation_meta = array(
+					'strongbox' => array( 'good', 'shield', 'StrongBox hardware' ),
+					'tee'       => array( 'good', 'lock', 'TEE hardware' ),
+					'software'  => array( 'warn', 'shield-alt', 'Software only' ),
+				);
+				?>
+				<?php foreach ( $devices as $d ) : ?>
+					<?php list( $att_tone, $att_icon, $att_label ) = $attestation_meta[ $d->attestation_level ?? '' ] ?? array( 'quiet', 'editor-help', 'Unverified' ); ?>
+					<tr>
+						<td><?php echo esc_html( $d->label ?: 'Unnamed device' ); ?></td>
+						<td><?php echo esc_html( mysql2date( 'M j, Y', $d->created_at ) ); ?></td>
+						<td><?php echo $d->last_used_at ? esc_html( mysql2date( 'M j, Y H:i', $d->last_used_at ) ) : '—'; ?></td>
+						<td><?php Thessley_UI::badge( $d->revoked_at ? 'Revoked' : 'Active', $d->revoked_at ? 'bad' : 'good', $d->revoked_at ? 'dismiss' : 'yes-alt' ); ?></td>
+						<td><?php Thessley_UI::badge( $att_label, $att_tone, $att_icon ); ?></td>
+						<td>
+							<?php if ( ! $d->revoked_at && ( get_current_user_id() === (int) $user->ID || current_user_can( 'manage_options' ) ) ) : ?>
+								<?php // No <form> here — nested forms inside profile.php/user-edit.php break WordPress core's own nonce check; the click handler further up uses fetch() instead. ?>
+								<button type="button" class="button button-small thessley-pk-revoke-btn"
+									data-id="<?php echo esc_attr( $d->id ); ?>"
+									data-user-id="<?php echo esc_attr( $user->ID ); ?>"
+									data-nonce="<?php echo esc_attr( wp_create_nonce( 'thessley_pk_revoke_' . $d->id ) ); ?>">Revoke</button>
+							<?php endif; ?>
+						</td>
+					</tr>
+				<?php endforeach; ?>
+				</tbody>
+			</table>
+			</div>
+			<?php
+		endif;
+		return ob_get_clean();
+	}
+
 
 	public static function handle_revoke() {
 		$id = (int) ( $_POST['id'] ?? 0 );
