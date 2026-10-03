@@ -840,7 +840,14 @@ class Thessley_Module_Passkey_Login {
 
 			<?php if ( get_current_user_id() === (int) $user->ID ) : ?>
 				<div id="thessley-pk-enroll-box" style="margin-top:16px;max-width:300px;padding:20px;border:1px solid #dcdcde;border-radius:6px;background:#fff;text-align:center">
-					<p id="thessley-pk-enroll-hint" class="description" style="margin:0 0 14px">Add a new device to sign in without a password.</p>
+					<?php
+				$enroll_hint_by_mode = array(
+					'optional' => "Add a new device to sign in without a password.",
+					'2fa'      => 'Add a new device to confirm logins with, after your password.',
+					'required' => 'Add a new device — the app is the only way to sign in.',
+				);
+				?>
+				<p id="thessley-pk-enroll-hint" class="description" style="margin:0 0 14px"><?php echo esc_html( $enroll_hint_by_mode[ self::mode() ] ?? $enroll_hint_by_mode['optional'] ); ?></p>
 					<button type="button" class="button button-primary" id="thessley-pk-enroll-start">Add a device</button>
 					<div id="thessley-pk-enroll-qr" style="display:none;margin:16px auto 0;line-height:0"></div>
 					<p id="thessley-pk-enroll-status" class="description" style="margin-top:12px;word-break:break-all"></p>
