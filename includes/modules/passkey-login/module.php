@@ -181,15 +181,53 @@ class Thessley_Module_Passkey_Login {
 	 * and works identically on every site since custom schemes don't
 	 * require per-domain registration the way https App Links do.
 	 */
-	private static function app_link( $type, $request_id, $nonce ) {
-		return 'thessleypasskey://auth?' . http_build_query(
-			array(
-				'type'   => $type,
-				'id'     => $request_id,
-				'nonce'  => $nonce,
-				'origin' => home_url(),
-			)
+	/**
+	 * @param string $ip The request's own IP (from create_request()'s
+	 *                   return value, or $request->ip for an already-
+	 *                   stored row) — shown on the app's approval screen
+	 *                   so a user asked to blindly approve a *relayed*
+	 *                   request (someone else's login, passed off as
+	 *                   "scan this to verify you're human") has an actual
+	 *                   signal to notice something's wrong, instead of
+	 *                   just a static warning with no context at all.
+	 */
+	private static function app_link( $type, $request_id, $nonce, $ip = '' ) {
+		$params = array(
+			'type'   => $type,
+			'id'     => $request_id,
+			'nonce'  => $nonce,
+			'origin' => home_url(),
 		);
+
+		if ( '' !== $ip ) {
+			$params['ip'] = $ip;
+			$country      = self::geo_label_for_ip( $ip );
+			if ( '' !== $country ) {
+				$params['country'] = $country;
+			}
+		}
+
+		return 'thessleypasskey://auth?' . http_build_query( $params );
+	}
+
+	/**
+	 * Best-effort country label for the approval-screen context above —
+	 * reuses Geo Blocker's own lookup functions, which only exist when
+	 * that module is enabled (and its dataset downloaded), so this must
+	 * degrade to '' rather than error when either is missing.
+	 */
+	private static function geo_label_for_ip( $ip ) {
+		if ( ! function_exists( 'thessley_geo_lookup' ) || ! function_exists( 'thessley_geo_country_label' ) || ! function_exists( 'thessley_data_file' ) ) {
+			return '';
+		}
+
+		$needle = ip2long( $ip );
+		if ( false === $needle ) {
+			return '';
+		}
+
+		$idx = thessley_geo_lookup( thessley_data_file( 'geo-country-index.bin' ), $needle );
+		return null === $idx ? '' : (string) thessley_geo_country_label( $idx );
 	}
 
 	/**
@@ -261,7 +299,7 @@ class Thessley_Module_Passkey_Login {
 	 * a fallback message.
 	 */
 	private static function render_2fa_page( $request ) {
-		$app_link  = self::app_link( '2fa', $request->request_id, $request->nonce );
+		$app_link  = self::app_link( '2fa', $request->request_id, $request->nonce, $request->ip );
 		$rest_base = esc_url_raw( rest_url( 'thessley/v1/passkey/login' ) );
 		$qr_src    = esc_url( THESSLEY_PLUGIN_URL . 'assets/vendor/qrcode.min.js' );
 		?>
@@ -398,7 +436,7 @@ class Thessley_Module_Passkey_Login {
 
 		$result             = Thessley_Passkey_Store::create_request( 'login', null, self::LOGIN_TTL );
 		$result['url']      = self::auth_url( 'login', $result['request_id'] );
-		$result['app_link'] = self::app_link( 'login', $result['request_id'], $result['nonce'] );
+		$result['app_link'] = self::app_link( 'login', $result['request_id'], $result['nonce'], $result['ip'] );
 
 		return rest_ensure_response( $result );
 	}
@@ -525,7 +563,7 @@ class Thessley_Module_Passkey_Login {
 
 		$result             = Thessley_Passkey_Store::create_request( 'enroll', get_current_user_id(), self::ENROLL_TTL );
 		$result['url']      = self::auth_url( 'enroll', $result['request_id'] );
-		$result['app_link'] = self::app_link( 'enroll', $result['request_id'], $result['nonce'] );
+		$result['app_link'] = self::app_link( 'enroll', $result['request_id'], $result['nonce'], $result['ip'] );
 
 		return rest_ensure_response( $result );
 	}

@@ -85,6 +85,7 @@ class Thessley_Passkey_Store {
 		$nonce      = self::random_token();
 		$now        = current_time( 'mysql', true );
 		$expires    = gmdate( 'Y-m-d H:i:s', time() + $ttl_seconds );
+		$ip         = thessley_client_ip();
 
 		$wpdb->insert(
 			self::requests_table(),
@@ -94,7 +95,7 @@ class Thessley_Passkey_Store {
 				'nonce'             => $nonce,
 				'status'            => 'pending',
 				'requester_user_id' => $requester_user_id,
-				'ip'                => thessley_client_ip(),
+				'ip'                => $ip,
 				'created_at'        => $now,
 				'expires_at'        => $expires,
 			),
@@ -104,6 +105,7 @@ class Thessley_Passkey_Store {
 		return array(
 			'request_id' => $request_id,
 			'nonce'      => $nonce,
+			'ip'         => $ip,
 			'expires_in' => $ttl_seconds,
 		);
 	}
