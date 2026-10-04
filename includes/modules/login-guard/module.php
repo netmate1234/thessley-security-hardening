@@ -267,16 +267,29 @@ class Thessley_Module_Login_Guard {
 	 * message so a brute-forcer can't enumerate valid users for free.
 	 */
 	public static function genericize_errors( $error ) {
-		// Don't mask our own lockout message, or Passkey Login's "use the
-		// app instead" message — a user told their password is "invalid"
-		// when it was actually correct (just refused by that module's
-		// required/2fa mode) would have no way to know what's really
-		// going on.
-		if ( is_string( $error ) && (
-			false !== strpos( $error, 'Too many failed login attempts' )
-			|| false !== strpos( $error, 'Password login is disabled for this account' )
-			|| false !== strpos( $error, 'requires app confirmation' )
-		) ) {
+		// Don't mask our own lockout message — that's rate-limit state,
+		// identical for every visitor regardless of what they typed, not
+		// a signal about any particular account.
+		//
+		// Passkey Login's "Password login is disabled"/"requires app
+		// confirmation" messages used to be exempted here too, on the
+		// theory that a user told their password is "invalid" when it
+		// was actually correct would have no way to know what's really
+		// going on. Removed: both messages only ever fire *after*
+		// Passkey Login's own check already confirmed the submitted
+		// password was correct (see maybe_block_password_login()'s
+		// `$user instanceof WP_User` guard) — exempting them handed a
+		// credential-stuffing attacker an exact, distinguishable signal
+		// that a guessed password was right, for any account in
+		// required/2fa mode. That's precisely the username/password-
+		// validity oracle this function exists to prevent. The one place
+		// that message actually matters for a legitimate user — the
+		// real 2fa browser flow — never reaches this filter at all (it's
+		// a redirect to the app-confirmation page, not an error), so
+		// genericizing here costs nothing on the path anyone actually
+		// uses; it only closes the oracle on the uncommon paths
+		// (required-mode's hidden-form bypass, XML-RPC, etc).
+		if ( is_string( $error ) && false !== strpos( $error, 'Too many failed login attempts' ) ) {
 			return $error;
 		}
 		return __( '<strong>Error:</strong> Invalid username, email address or password.', 'thessley-security-hardening' );
