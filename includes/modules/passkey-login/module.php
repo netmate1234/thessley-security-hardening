@@ -438,43 +438,8 @@ class Thessley_Module_Passkey_Login {
 		$result['app_link'] = self::app_link( 'login', $result['request_id'], $result['nonce'], $result['ip'] );
 
 		self::bind_browser_to_request( $result['request_id'] );
-		$result['match_code'] = self::generate_match_code( $result['request_id'] );
 
 		return rest_ensure_response( $result );
-	}
-
-	/**
-	 * Enforced number-matching, same idea as Microsoft Authenticator's
-	 * anti-push-fatigue code — raises the QR-relay attack from "relay a
-	 * static QR/link once" to "also relay this code live, in real time,
-	 * every single attempt." Deliberately NEVER embedded in the QR or
-	 * app_link: if it travelled with the QR, an attacker's relay would
-	 * carry the (correct) code right along with it and this would check
-	 * nothing at all — a phone that just echoes back whatever it decoded
-	 * from the same link always "matches." The whole point is that only
-	 * the *browser* that actually called this endpoint ever sees the
-	 * real code; the phone has to get it from the human, who has to get
-	 * it by looking at their own screen.
-	 *
-	 * Doesn't make a relay attack impossible — a live, interactive
-	 * attacker who coaches the victim through reading the code back
-	 * (the same way a vishing call-center scam already operates) can
-	 * still defeat it. It does kill the "cheap, automated, one-shot"
-	 * version of the attack: a static phishing page or a fire-and-forget
-	 * relay has no channel to also surface this value, since the real
-	 * code is generated independently of, and never travels with,
-	 * anything the attacker's side of the relay ever sees.
-	 */
-	private static function generate_match_code( $request_id ) {
-		$code = str_pad( (string) random_int( 0, 99 ), 2, '0', STR_PAD_LEFT );
-		set_transient( 'thessley_pk_mc_' . $request_id, $code, self::LOGIN_TTL + 30 );
-		return $code;
-	}
-
-	/** @return bool Whether $submitted matches the code generate_match_code() issued for $request_id. */
-	private static function match_code_valid( $request_id, $submitted ) {
-		$expected = get_transient( 'thessley_pk_mc_' . $request_id );
-		return is_string( $expected ) && '' !== $expected && hash_equals( $expected, (string) $submitted );
 	}
 
 	/**
@@ -625,24 +590,6 @@ class Thessley_Module_Passkey_Login {
 			);
 		}
 
-		// Enforced number-matching (see generate_match_code()'s docblock)
-		// — 'login' type + approve only. Not applied to deny (declining
-		// a suspicious request should never need extra friction) or to
-		// 2fa (that flow already knows who's logging in from the
-		// password step, so it isn't the anonymous-identity case this
-		// defends).
-		if ( 'login' === $request->type && 'approve' === $action ) {
-			$match_code = (string) $req->get_param( 'match_code' );
-			if ( ! self::match_code_valid( $id, $match_code ) ) {
-				thessley_log_event( 'passkey-login', 'match_code_mismatch', 'blocked', 'credential ' . $cred_id . ' — confirmation code did not match (possible relayed request)' );
-				return new WP_Error(
-					'thessley_code_mismatch',
-					"The code didn't match what your browser shows. If you didn't start this login yourself, deny it.",
-					array( 'status' => 401 )
-				);
-			}
-		}
-
 		$message = Thessley_Passkey_Crypto::canonical_string( $request->type, $id, home_url(), $request->nonce, $timestamp, $action );
 
 		if ( ! Thessley_Passkey_Crypto::verify( $passkey->public_key, $message, $signature ) ) {
@@ -662,8 +609,6 @@ class Thessley_Module_Passkey_Login {
 		if ( ! $resolved ) {
 			return new WP_Error( 'thessley_already_resolved', 'This request was already resolved.', array( 'status' => 409 ) );
 		}
-
-		delete_transient( 'thessley_pk_mc_' . $id );
 
 		return rest_ensure_response( array( 'result' => 'ok' ) );
 	}
@@ -890,8 +835,6 @@ class Thessley_Module_Passkey_Login {
 			"  if (!box) return;\n" .
 			"  fetch('{$rest_base}/start', {method:'POST'}).then(function(r){return r.json();}).then(function(data){\n" .
 			"    new QRCode(document.getElementById('thessley-passkey-qr'), {text: data.app_link, width: 180, height: 180});\n" .
-			"    var codeEl = document.getElementById('thessley-passkey-matchcode');\n" .
-			"    if (codeEl) { codeEl.textContent = data.match_code; }\n" .
 			"    var linkEl = document.getElementById('thessley-passkey-link');\n" .
 			"    if (linkEl) { linkEl.href = data.app_link; }\n" .
 			"    var poll = setInterval(function(){\n" .
@@ -914,8 +857,6 @@ class Thessley_Module_Passkey_Login {
 		<div id="thessley-passkey-box" style="margin:12px 0;padding:12px;border:1px solid #dcdcde;border-radius:4px;text-align:center">
 			<p class="description">Scan this code with the Thessley Passkey app, or open it on this device.</p>
 			<div id="thessley-passkey-qr" style="display:inline-block;line-height:0"></div>
-			<p id="thessley-passkey-matchcode" style="font-size:1.7em;font-weight:700;letter-spacing:3px;margin:10px 0 0"></p>
-			<p class="description" style="margin:2px 0 0">The app will ask you to type this code — it proves you're the one at this screen, not someone who sent you this link.</p>
 			<p><a id="thessley-passkey-link" href="#">Open on this device</a></p>
 		</div>
 		<?php
