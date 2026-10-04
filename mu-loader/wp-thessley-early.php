@@ -155,6 +155,7 @@ if ( ! function_exists( 'thessley_severity_map' ) ) {
 
 			// --- Serious exploitation attempts ------------------------
 			'passkey-login:signature_invalid'       => 13,
+			'passkey-login:match_code_mismatch'     => 12,
 			'query-guard:upload_executable_ext'     => 17,
 			'query-guard:body_php_open_tag'         => 16,
 			'query-guard:body_eval_exec'            => 16,
