@@ -281,9 +281,8 @@ class Thessley_Module_Passkey_Login {
 
 		printf(
 			'<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>%1$s</title>' .
-			'<p>Open this on the device with the %2$s app installed to continue.</p>' .
-			'<p><a href="%3$s">Get the app</a></p>',
-			esc_html( get_bloginfo( 'name' ) ),
+			'<p>Open this on the device with the Thessley Passkey app installed to continue.</p>' .
+			'<p><a href="%2$s">Get the app</a></p>',
 			esc_html( get_bloginfo( 'name' ) ),
 			esc_url( 'https://play.google.com/store/apps/details?id=' . self::app_package_id() )
 		);
