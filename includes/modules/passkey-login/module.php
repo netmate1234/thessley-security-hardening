@@ -760,7 +760,7 @@ class Thessley_Module_Passkey_Login {
 		}
 		?>
 		<div id="thessley-passkey-box" style="margin:12px 0;padding:12px;border:1px solid #dcdcde;border-radius:4px;text-align:center">
-			<p class="description">Scan this code with the <?php echo esc_html( get_bloginfo( 'name' ) ); ?> app, or open it on this device.</p>
+			<p class="description">Scan this code with the Thessley Passkey app, or open it on this device.</p>
 			<div id="thessley-passkey-qr" style="display:inline-block;line-height:0"></div>
 			<p><a id="thessley-passkey-link" href="#">Open on this device</a></p>
 		</div>
