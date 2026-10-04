@@ -54,9 +54,10 @@ class Thessley_Passkey_Attestation {
 	/**
 	 * @param string[] $der_certs_b64 Base64 DER certificates, leaf-first.
 	 * @param string   $expected_challenge Raw bytes the attestation challenge must match (this plugin uses the enroll request's own nonce, UTF-8 bytes).
+	 * @param string   $registered_public_key_b64 Base64 DER SubjectPublicKeyInfo of the key actually stored as this credential's public key (same format/value Thessley_Passkey_Crypto::verify() takes) — pass '' to skip this check.
 	 * @return array{ok:bool, reason?:string, security_level?:int, security_level_name?:string, chain_length?:int}
 	 */
-	public static function verify( array $der_certs_b64, $expected_challenge ) {
+	public static function verify( array $der_certs_b64, $expected_challenge, $registered_public_key_b64 = '' ) {
 		if ( empty( $der_certs_b64 ) ) {
 			return array( 'ok' => false, 'reason' => 'no_chain' );
 		}
@@ -103,6 +104,29 @@ class Thessley_Passkey_Attestation {
 
 		if ( ! hash_equals( (string) $expected_challenge, (string) $fields['challenge'] ) ) {
 			return array( 'ok' => false, 'reason' => 'challenge_mismatch' );
+		}
+
+		// Without this, a valid attestation chain for *any* key (e.g. a
+		// disposable one generated purely to produce a passing chain)
+		// could be submitted alongside a completely unrelated key as
+		// the credential's actual registered public key — fully
+		// defeating hardware-attestation enforcement the moment this
+		// stops being log-only and starts being an enforced gate. The
+		// attestation extension proves things about *the leaf
+		// certificate's own key*, not about whatever key_param the rest
+		// of the enroll request separately claims is the credential.
+		if ( '' !== $registered_public_key_b64 ) {
+			$leaf_pubkey = openssl_pkey_get_public( $pems[0] );
+			$details     = $leaf_pubkey ? openssl_pkey_get_details( $leaf_pubkey ) : false;
+			if ( ! $details || empty( $details['key'] ) ) {
+				return array( 'ok' => false, 'reason' => 'leaf_pubkey_unreadable' );
+			}
+
+			$leaf_der       = self::pem_to_der( $details['key'] );
+			$registered_der = base64_decode( $registered_public_key_b64, true );
+			if ( false === $registered_der || ! hash_equals( (string) $registered_der, (string) $leaf_der ) ) {
+				return array( 'ok' => false, 'reason' => 'key_mismatch' );
+			}
 		}
 
 		$level_names = array(
@@ -226,5 +250,11 @@ class Thessley_Passkey_Attestation {
 
 	private static function der_to_pem_key( $der ) {
 		return "-----BEGIN PUBLIC KEY-----\n" . chunk_split( base64_encode( $der ), 64, "\n" ) . "-----END PUBLIC KEY-----\n";
+	}
+
+	/** Inverse of der_to_pem_key() — strips the PEM header/footer/line-wrapping openssl_pkey_get_details() returns and decodes back to raw DER. */
+	private static function pem_to_der( $pem ) {
+		$body = preg_replace( '/-----(BEGIN|END) PUBLIC KEY-----|\s+/', '', $pem );
+		return (string) base64_decode( $body, true );
 	}
 }

@@ -191,6 +191,7 @@ if ( ! function_exists( 'thessley_severity_map' ) ) {
 			// --- Targeted probing / confirmed brute force -------------
 			'passkey-login:login_denied'            => 10,
 			'passkey-login:anonymous_login_blocked' => 10,
+			'passkey-login:login_csrf_blocked'      => 10,
 			'login-guard:lockout'                   => 12,
 			'login-guard:locked_attempt'            => 10,
 			'query-guard:xmlrpc_access'             => 10,

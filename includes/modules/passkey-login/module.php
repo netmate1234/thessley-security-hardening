@@ -437,7 +437,50 @@ class Thessley_Module_Passkey_Login {
 		$result['url']      = self::auth_url( 'login', $result['request_id'] );
 		$result['app_link'] = self::app_link( 'login', $result['request_id'], $result['nonce'], $result['ip'] );
 
+		self::bind_browser_to_request( $result['request_id'] );
+
 		return rest_ensure_response( $result );
+	}
+
+	/**
+	 * Login-CSRF guard: without this, any browser that knows a
+	 * request_id (or forces one to load via e.g. a bare `<img>` tag —
+	 * no click needed) could GET /login/{id}/status itself and receive
+	 * the resulting auth cookie once the real device approves it. Not
+	 * account takeover — the attacker already needed their own device
+	 * to approve their own request — but it plants *that* session into
+	 * an unrelated victim's browser, the same class of problem a normal
+	 * form nonce prevents for a POST. Binds the one browser that called
+	 * *_start() as the only one allowed to actually receive the cookie
+	 * for that specific request, the same way wp_login.php's own nonce
+	 * binds a login POST to the page that rendered its form.
+	 *
+	 * A transient (not a DB column) because these tokens are exactly as
+	 * short-lived as the request itself — no migration needed for
+	 * something that's gone in under two minutes either way.
+	 */
+	private static function bind_browser_to_request( $request_id ) {
+		$token = bin2hex( random_bytes( 16 ) );
+		set_transient( 'thessley_pk_bt_' . $request_id, $token, self::LOGIN_TTL + 30 );
+		setcookie(
+			'thessley_pk_bt',
+			$token,
+			array(
+				'expires'  => time() + self::LOGIN_TTL + 30,
+				'path'     => '/',
+				'secure'   => is_ssl(),
+				'httponly' => true,
+				'samesite' => 'Strict',
+			)
+		);
+	}
+
+	/** @return bool Whether the calling browser is the one bind_browser_to_request() bound this request_id to. */
+	private static function browser_matches_request( $request_id ) {
+		$expected = get_transient( 'thessley_pk_bt_' . $request_id );
+		$actual   = isset( $_COOKIE['thessley_pk_bt'] ) ? (string) $_COOKIE['thessley_pk_bt'] : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- compared with hash_equals() below, never echoed or used otherwise.
+
+		return is_string( $expected ) && '' !== $expected && '' !== $actual && hash_equals( $expected, $actual );
 	}
 
 	public static function rest_login_status( WP_REST_Request $req ) {
@@ -452,9 +495,24 @@ class Thessley_Module_Passkey_Login {
 		}
 
 		if ( 'approved' === $request->status ) {
+			// Only the browser bind_browser_to_request() bound this
+			// request_id to gets the cookie — anyone else polling this
+			// same request_id (e.g. a forced background image load from
+			// an attacker who approved their own request with their own
+			// device) just sees "pending" forever, same as before it was
+			// approved. Deliberately doesn't consume the row here: the
+			// real browser still needs to be able to complete this on
+			// its own next poll.
+			if ( ! self::browser_matches_request( $id ) ) {
+				thessley_log_event( 'passkey-login', 'login_csrf_blocked', 'blocked', 'request ' . $id . ' — polled by a browser that never called *_start()' );
+
+				return rest_ensure_response( array( 'status' => 'pending' ) );
+			}
+
 			// First (and only) time this flips to "approved" for the poller:
 			// establish the real WP session, then consume the row so a
 			// captured/replayed copy of this response can't do it again.
+			delete_transient( 'thessley_pk_bt_' . $id );
 			wp_set_auth_cookie( (int) $request->approver_user_id, false );
 			do_action( 'wp_login', get_userdata( (int) $request->approver_user_id )->user_login, get_userdata( (int) $request->approver_user_id ) );
 			Thessley_Passkey_Store::consume_request( $id );
@@ -641,7 +699,7 @@ class Thessley_Module_Passkey_Login {
 
 		thessley_log_event( 'passkey-login', 'enroll_approved', 'noted', 'user #' . (int) $request->requester_user_id . ' added device "' . sanitize_text_field( $label ) . '"' );
 		self::notify_device_enrolled( (int) $request->requester_user_id, $label );
-		self::record_attestation( $row_id, $attestation_chain, $request->nonce );
+		self::record_attestation( $row_id, $attestation_chain, $request->nonce, $public_key );
 
 		// The app needs this for every future login/respond call — it has
 		// no other way to learn the server-assigned credential_id, since
@@ -704,8 +762,8 @@ class Thessley_Module_Passkey_Login {
 	 * software-only (non-hardware-backed) result is worth knowing about
 	 * even before this becomes a hard gate.
 	 */
-	private static function record_attestation( $row_id, $attestation_chain, $nonce ) {
-		$result = Thessley_Passkey_Attestation::verify( $attestation_chain, $nonce );
+	private static function record_attestation( $row_id, $attestation_chain, $nonce, $public_key ) {
+		$result = Thessley_Passkey_Attestation::verify( $attestation_chain, $nonce, $public_key );
 
 		if ( ! $result['ok'] ) {
 			Thessley_Passkey_Store::set_attestation_level( $row_id, null );
@@ -1120,6 +1178,8 @@ class Thessley_Module_Passkey_Login {
 		}
 
 		$result = Thessley_Passkey_Store::create_request( '2fa', $user->ID, self::LOGIN_TTL );
+
+		self::bind_browser_to_request( $result['request_id'] );
 
 		thessley_log_event( 'passkey-login', 'password_step_ok', 'noted', 'user #' . $user->ID . ' — awaiting app confirmation' );
 
