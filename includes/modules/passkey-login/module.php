@@ -191,7 +191,20 @@ class Thessley_Module_Passkey_Login {
 	 *                   signal to notice something's wrong, instead of
 	 *                   just a static warning with no context at all.
 	 */
-	private static function app_link( $type, $request_id, $nonce, $ip = '' ) {
+	/**
+	 * @param string $username Only meaningful for 'type' === '2fa', where
+	 *                         the password step already identified the
+	 *                         account — lets the app auto-pick the right
+	 *                         locally-enrolled device for that account
+	 *                         instead of guessing, now that a phone can
+	 *                         hold more than one enrolled account for the
+	 *                         same origin. 'login' requests get nothing
+	 *                         here on purpose: that flow is anonymous by
+	 *                         design (whichever device approves IS the
+	 *                         identification), so there's deliberately no
+	 *                         server-known account to pre-select.
+	 */
+	private static function app_link( $type, $request_id, $nonce, $ip = '', $username = '' ) {
 		$params = array(
 			'type'   => $type,
 			'id'     => $request_id,
@@ -205,6 +218,10 @@ class Thessley_Module_Passkey_Login {
 			if ( '' !== $country ) {
 				$params['country'] = $country;
 			}
+		}
+
+		if ( '' !== $username ) {
+			$params['username'] = $username;
 		}
 
 		return 'thessleypasskey://auth?' . http_build_query( $params );
@@ -298,7 +315,8 @@ class Thessley_Module_Passkey_Login {
 	 * a fallback message.
 	 */
 	private static function render_2fa_page( $request ) {
-		$app_link  = self::app_link( '2fa', $request->request_id, $request->nonce, $request->ip );
+		$requester  = get_userdata( (int) $request->requester_user_id );
+		$app_link   = self::app_link( '2fa', $request->request_id, $request->nonce, $request->ip, $requester ? $requester->user_login : '' );
 		$rest_base = esc_url_raw( rest_url( 'thessley/v1/passkey/login' ) );
 		$qr_src    = esc_url( THESSLEY_PLUGIN_URL . 'assets/vendor/qrcode.min.js' );
 		?>
@@ -706,10 +724,21 @@ class Thessley_Module_Passkey_Login {
 		// it necessarily generated its local keypair before this request
 		// (the server can't hand out an id for a key it hasn't verified
 		// possession of yet).
+		//
+		// username is new: the app previously had no idea *which account*
+		// a stored device belonged to, which is exactly what made more
+		// than one enrolled account on the same site+phone unworkable —
+		// nothing to tell them apart by. Stored alongside credential_id
+		// so the app can label its device list and, for a 2fa challenge
+		// (which already knows who's logging in), pick the matching
+		// local device automatically instead of guessing.
+		$enrolled_user = get_userdata( (int) $request->requester_user_id );
+
 		return rest_ensure_response(
 			array(
 				'result'        => 'ok',
 				'credential_id' => $credential_id,
+				'username'      => $enrolled_user ? $enrolled_user->user_login : '',
 			)
 		);
 	}
