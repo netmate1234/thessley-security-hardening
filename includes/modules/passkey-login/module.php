@@ -327,7 +327,7 @@ class Thessley_Module_Passkey_Login {
 		<div style="max-width:360px;margin:40px auto;padding:16px;font-family:sans-serif;text-align:center">
 			<h1 style="font-size:1.1em"><?php echo esc_html( get_bloginfo( 'name' ) ); ?></h1>
 			<p>Your password was correct. Confirm with the app to finish logging in.</p>
-			<div id="thessley-2fa-qr" style="display:inline-block;line-height:0"></div>
+			<div id="thessley-2fa-qr" style="display:inline-block;line-height:0;background:#fff;padding:12px;border-radius:4px"></div>
 			<p><a href="<?php echo esc_attr( $app_link ); ?>">Open on this device</a></p>
 			<p id="thessley-2fa-status" style="color:#666"></p>
 		</div>
@@ -885,7 +885,7 @@ class Thessley_Module_Passkey_Login {
 		?>
 		<div id="thessley-passkey-box" style="margin:12px 0;padding:12px;border:1px solid #dcdcde;border-radius:4px;text-align:center">
 			<p class="description">Scan this code with the Thessley Passkey app, or open it on this device.</p>
-			<div id="thessley-passkey-qr" style="display:inline-block;line-height:0"></div>
+			<div id="thessley-passkey-qr" style="display:inline-block;line-height:0;background:#fff;padding:12px;border-radius:4px"></div>
 			<p><a id="thessley-passkey-link" href="#">Open on this device</a></p>
 		</div>
 		<?php
@@ -967,7 +967,7 @@ class Thessley_Module_Passkey_Login {
 				?>
 				<p id="thessley-pk-enroll-hint" class="description" style="margin:0 0 14px"><?php echo esc_html( $enroll_hint_by_mode[ self::mode() ] ?? $enroll_hint_by_mode['optional'] ); ?></p>
 					<button type="button" class="button button-primary" id="thessley-pk-enroll-start">Add a device</button>
-					<div id="thessley-pk-enroll-qr" style="display:none;margin:16px auto 0;line-height:0"></div>
+					<div id="thessley-pk-enroll-qr" style="display:none;margin:16px auto 0;line-height:0;background:#fff;padding:12px;border-radius:4px"></div>
 					<p id="thessley-pk-enroll-status" class="description" style="margin-top:12px;word-break:break-all"></p>
 				</div>
 			<?php endif; ?>
