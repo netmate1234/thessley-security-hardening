@@ -28,8 +28,10 @@ require_once __DIR__ . '/class-attestation.php';
  * The Android app itself is a separate codebase — this module is the
  * server half of the protocol only.
  *
- * QR rendering uses davidshimjs/qrcodejs (MIT), bundled locally at
- * assets/vendor/qrcode.min.js rather than loaded from a CDN — this
+ * QR codes are rendered as inline SVG (vector, scannable at any size or
+ * screen density) by kazuhikoarase/qrcode-generator (MIT), bundled locally
+ * at assets/vendor/qrcode-generator.js with a small wrapper,
+ * assets/thessley-qr.js, rather than loaded from a CDN — this
  * plugin ships through the WordPress.org directory, which expects
  * bundled assets, not remote script dependencies.
  *
@@ -307,6 +309,18 @@ class Thessley_Module_Passkey_Login {
 	}
 
 	/**
+	 * Registers (does not print) the QR scripts — the library, then the
+	 * ThessleyQR.render() wrapper that depends on it. Every place that draws
+	 * a QR depends on the 'thessley-qr' handle.
+	 */
+	private static function register_qr_scripts() {
+		if ( ! wp_script_is( 'thessley-qrcode-generator', 'registered' ) ) {
+			wp_register_script( 'thessley-qrcode-generator', THESSLEY_PLUGIN_URL . 'assets/vendor/qrcode-generator.js', array(), THESSLEY_VERSION, true );
+			wp_register_script( 'thessley-qr', THESSLEY_PLUGIN_URL . 'assets/thessley-qr.js', array( 'thessley-qrcode-generator' ), THESSLEY_VERSION, true );
+		}
+	}
+
+	/**
 	 * Unlike a plain login/enroll request — which shows its QR on the page
 	 * that started it (wp-login.php, profile.php) and only falls back to
 	 * this route if the app failed to intercept the link — a 2fa request
@@ -318,7 +332,6 @@ class Thessley_Module_Passkey_Login {
 		$requester  = get_userdata( (int) $request->requester_user_id );
 		$app_link   = self::app_link( '2fa', $request->request_id, $request->nonce, $request->ip, $requester ? $requester->user_login : '' );
 		$rest_base = esc_url_raw( rest_url( 'thessley/v1/passkey/login' ) );
-		$qr_src    = esc_url( THESSLEY_PLUGIN_URL . 'assets/vendor/qrcode.min.js' );
 		?>
 		<!doctype html>
 		<meta charset="utf-8">
@@ -331,10 +344,17 @@ class Thessley_Module_Passkey_Login {
 			<p><a href="<?php echo esc_attr( $app_link ); ?>">Open on this device</a></p>
 			<p id="thessley-2fa-status" style="color:#666"></p>
 		</div>
-		<script src="<?php echo $qr_src; ?>"></script>
+		<?php
+		// This standalone page never runs wp_head()/wp_footer(), so the
+		// registered scripts are printed explicitly, still through the
+		// script API (dependency order, version, escaped URL) rather than
+		// a hand-written <script src>.
+		self::register_qr_scripts();
+		wp_print_scripts( 'thessley-qr' );
+		?>
 		<script>
 		(function () {
-			new QRCode(document.getElementById('thessley-2fa-qr'), { text: <?php echo wp_json_encode( $app_link ); ?>, width: 200, height: 200 });
+			ThessleyQR.render(document.getElementById('thessley-2fa-qr'), <?php echo wp_json_encode( $app_link ); ?>, 300);
 
 			var statusEl = document.getElementById('thessley-2fa-status');
 			var poll = setInterval(function () {
@@ -806,12 +826,13 @@ class Thessley_Module_Passkey_Login {
 
 	// --- wp-login.php integration ----------------------------------------
 
-	/** render_profile_section()'s inline <script> (below) relies on the global QRCode this defines — profile.php/user-edit.php only, not every admin page. */
+	/** render_profile_section()'s inline <script> (below) relies on the global ThessleyQR this defines — profile.php/user-edit.php only, not every admin page. */
 	public static function profile_page_assets( $hook ) {
 		if ( ! self::enabled() || ! in_array( $hook, array( 'profile.php', 'user-edit.php' ), true ) ) {
 			return;
 		}
-		wp_enqueue_script( 'thessley-qrcodejs', THESSLEY_PLUGIN_URL . 'assets/vendor/qrcode.min.js', array(), THESSLEY_VERSION, true );
+		self::register_qr_scripts();
+		wp_enqueue_script( 'thessley-qr' );
 		// Pulled in here too (normally only loaded on the plugin's own
 		// wp-thessley-* pages) so the device list below can use the same
 		// Thessley_UI::badge() house style as the rest of the plugin
@@ -850,9 +871,9 @@ class Thessley_Module_Passkey_Login {
 			return; // password form only — see login_head_styles()'s docblock
 		}
 
-		wp_enqueue_script( 'thessley-qrcodejs', THESSLEY_PLUGIN_URL . 'assets/vendor/qrcode.min.js', array(), THESSLEY_VERSION, true );
+		self::register_qr_scripts();
 
-		wp_register_script( 'thessley-passkey-login', false, array( 'thessley-qrcodejs' ), THESSLEY_VERSION, true );
+		wp_register_script( 'thessley-passkey-login', false, array( 'thessley-qr' ), THESSLEY_VERSION, true );
 		wp_enqueue_script( 'thessley-passkey-login' );
 
 		$rest_base = esc_url_raw( rest_url( 'thessley/v1/passkey/login' ) );
@@ -863,7 +884,7 @@ class Thessley_Module_Passkey_Login {
 			"  var box = document.getElementById('thessley-passkey-box');\n" .
 			"  if (!box) return;\n" .
 			"  fetch('{$rest_base}/start', {method:'POST'}).then(function(r){return r.json();}).then(function(data){\n" .
-			"    new QRCode(document.getElementById('thessley-passkey-qr'), {text: data.app_link, width: 180, height: 180});\n" .
+			"    ThessleyQR.render(document.getElementById('thessley-passkey-qr'), data.app_link, 270);\n" .
 			"    var linkEl = document.getElementById('thessley-passkey-link');\n" .
 			"    if (linkEl) { linkEl.href = data.app_link; }\n" .
 			"    var poll = setInterval(function(){\n" .
@@ -1036,7 +1057,7 @@ class Thessley_Module_Passkey_Login {
 									hint.textContent = "Scan this with the device you're enrolling, or tap the link below on that same device.";
 									qrBox.style.display = 'inline-block';
 									qrBox.innerHTML = '';
-									new QRCode(qrBox, { text: data.app_link, width: 180, height: 180 });
+									ThessleyQR.render(qrBox, data.app_link, 236);
 									status.innerHTML = '<a href="' + data.app_link + '">Open on this device</a>';
 
 									var poll = setInterval(function () {
