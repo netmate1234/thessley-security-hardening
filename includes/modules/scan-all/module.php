@@ -5,14 +5,14 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 /**
  * One button to run every on-demand scan module at once, rather than
- * visiting File Integrity, Malware Scanner, Vulnerability Scan, and User
- * Watchdog individually. Calls each module's scan method directly and
+ * visiting File Integrity, Malware Scanner, Vulnerability Scan, User
+ * Watchdog, and Hardening individually. Calls each module's scan method directly and
  * synchronously — the same thing each module's own "Scan Now" button
  * already does, just chained. An earlier version tried scheduling each
  * as an immediate one-off wp-cron event instead, to avoid making the
  * admin wait: that turned out to be unreliable rather than just slower,
  * since wp_schedule_single_event() silently refuses to add a new event
- * for a hook that already has ANY pending occurrence — and all four
+ * for a hook that already has ANY pending occurrence — and several
  * modules already register their own recurring schedule on activation,
  * so the one-off routinely got dropped with no error and no scan ran.
  * A raised time limit plus an honest "this may take a moment" in the UI
@@ -20,7 +20,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  *
  * IP Blocklist and Geo Blocker have their own "Refresh now" actions but
  * aren't included here: those refresh external reputation data, not scan
- * this install for problems — a different kind of action than the four
+ * this install for problems — a different kind of action than what
  * this page covers.
  */
 class Thessley_Module_Scan_All {
@@ -32,6 +32,7 @@ class Thessley_Module_Scan_All {
 			'malware-scanner' => 'Malware Scanner',
 			'vuln-scanner'    => 'Vulnerability Scan',
 			'user-watchdog'   => 'User Watchdog',
+			'hardening'       => 'Hardening',
 		);
 	}
 
@@ -42,7 +43,7 @@ class Thessley_Module_Scan_All {
 		add_action( 'admin_post_thessley_sa_run', array( __CLASS__, 'handle_run' ) );
 		// JS runs each scan one at a time via this and updates the page as
 		// each finishes; the admin_post handler above is the no-JS fallback,
-		// still fully functional (one request, all four, then a redirect)
+		// still fully functional (one request, all five, then a redirect)
 		// if JS is disabled or the fetch calls fail for some reason.
 		add_action( 'wp_ajax_thessley_sa_run_one', array( __CLASS__, 'handle_run_one' ) );
 		return __CLASS__;
@@ -68,6 +69,17 @@ class Thessley_Module_Scan_All {
 			case 'user-watchdog':
 				if ( class_exists( 'Thessley_Module_User_Watchdog' ) ) {
 					Thessley_Module_User_Watchdog::scan();
+				}
+				break;
+			case 'hardening':
+				// Only the two read-only detection scans — not
+				// write_root_guard()/write_uploads_guard(), which are a
+				// different, mutating action (actually writing .htaccess
+				// rules) that belongs to Save Settings, not a bulk "scan
+				// everything" trigger.
+				if ( class_exists( 'Thessley_Module_Hardening' ) ) {
+					Thessley_Module_Hardening::scan_hidden_plugins();
+					Thessley_Module_Hardening::scan_exposed_files();
 				}
 				break;
 		}
@@ -112,7 +124,7 @@ class Thessley_Module_Scan_All {
 		}
 
 		// File Integrity alone budgets up to 25s; the combined run of all
-		// four can exceed a typical 30s default. This is an explicit,
+		// five can exceed a typical 30s default. This is an explicit,
 		// admin-triggered action (not something on the request path for a
 		// site visitor), so a generous ceiling here is the right trade-off.
 		if ( function_exists( 'set_time_limit' ) ) {
@@ -159,6 +171,16 @@ class Thessley_Module_Scan_All {
 				// "last routine scan", unlike file-integrity's baseline_at.
 				$at = (int) get_option( 'thessley_user_watchdog_snapshot_at', 0 );
 				return array( $at, count( (array) get_option( 'thessley_user_watchdog_alerts', array() ) ), 'alert(s)' );
+
+			case 'hardening':
+				// Two separate scans, one combined row — same "at" either
+				// way once both have actually run together via this page,
+				// but take the later of the two rather than assume that.
+				$exposed = get_option( 'thessley_hardening_exposed_result', array() );
+				$hidden  = get_option( 'thessley_hardening_hidden_result', array() );
+				$at      = max( (int) ( $exposed['at'] ?? 0 ), (int) ( $hidden['at'] ?? 0 ) );
+				$count   = count( (array) ( $exposed['files'] ?? array() ) ) + count( (array) ( $hidden['hidden'] ?? array() ) );
+				return array( $at, $count, 'issue(s)' );
 		}
 		return array( 0, 0, '' );
 	}
@@ -168,7 +190,7 @@ class Thessley_Module_Scan_All {
 
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only result flag set only by this module's own admin-post redirect, which already check_admin_referer()'d before redirecting.
 		if ( isset( $_GET['triggered'] ) ) {
-			Thessley_UI::notice( 'success', 'All four scans finished — see updated results below.' );
+			Thessley_UI::notice( 'success', 'All five scans finished — see updated results below.' );
 		}
 
 		$last_triggered = (int) get_option( 'thessley_scan_all_last_triggered', 0 );
@@ -178,7 +200,7 @@ class Thessley_Module_Scan_All {
 				array(
 					'icon'  => 'search',
 					'tone'  => 'quiet',
-					'value' => '4',
+					'value' => '5',
 					'label' => 'scans included',
 				),
 				array(
@@ -198,7 +220,7 @@ class Thessley_Module_Scan_All {
 				<?php submit_button( 'Scan everything now', 'primary', 'submit', false, array( 'id' => 'thessley-sa-button' ) ); ?>
 			</form>
 			<p class="thessley-help" style="margin-top:6px" id="thessley-sa-help">
-				Runs File Integrity, Malware Scanner, Vulnerability Scan, and User Watchdog one at a time, updating the table below as each finishes.
+				Runs File Integrity, Malware Scanner, Vulnerability Scan, User Watchdog, and Hardening one at a time, updating the table below as each finishes.
 			</p>
 		</div>
 
@@ -300,7 +322,7 @@ class Thessley_Module_Scan_All {
 				chain.then( function () {
 					btn.disabled = false;
 					btn.textContent = 'Scan everything now';
-					help.textContent = 'All four finished.';
+					help.textContent = 'All five finished.';
 				} );
 			} );
 		})();
