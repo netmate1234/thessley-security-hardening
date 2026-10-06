@@ -483,6 +483,22 @@ if ( ! function_exists( 'thessley_maybe_unwantedip_report' ) ) {
 		if ( 'blocked' !== $action ) {
 			return;
 		}
+
+		// Modules whose "blocked" events are about this site's own users and
+		// their devices, never about hostile traffic, so the IP involved is
+		// someone's phone or home connection, not an attacker's. Passkey
+		// Login is the case: password_login_blocked fires for a legitimate
+		// user typing a correct password where only the app is allowed,
+		// signature_invalid and anonymous_login_blocked fire from the app on
+		// the user's own phone (a clock-skew or origin-mismatch bug is
+		// enough), and login_csrf_blocked carries the *victim's* browser IP,
+		// not the attacker's. Publishing any of those on a shared, public
+		// reputation tracker would mark an innocent address as malicious.
+		// They still reach the Event Log (and local alerts) as usual; only
+		// the outward report is skipped.
+		if ( in_array( $module, array( 'passkey-login' ), true ) ) {
+			return;
+		}
 		if ( ! get_option( 'thessley_unwantedip_enabled', false ) ) {
 			return;
 		}

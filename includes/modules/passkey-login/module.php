@@ -516,7 +516,9 @@ class Thessley_Module_Passkey_Login {
 	/** @return bool Whether the calling browser is the one bind_browser_to_request() bound this request_id to. */
 	private static function browser_matches_request( $request_id ) {
 		$expected = get_transient( 'thessley_pk_bt_' . $request_id );
-		$actual   = isset( $_COOKIE['thessley_pk_bt'] ) ? (string) $_COOKIE['thessley_pk_bt'] : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- compared with hash_equals() below, never echoed or used otherwise.
+		// The token is lowercase hex (bin2hex()), which sanitize_text_field()
+		// leaves untouched, so a genuine cookie still matches byte for byte.
+		$actual = isset( $_COOKIE['thessley_pk_bt'] ) ? sanitize_text_field( wp_unslash( $_COOKIE['thessley_pk_bt'] ) ) : '';
 
 		return is_string( $expected ) && '' !== $expected && '' !== $actual && hash_equals( $expected, $actual );
 	}
@@ -552,7 +554,11 @@ class Thessley_Module_Passkey_Login {
 			// captured/replayed copy of this response can't do it again.
 			delete_transient( 'thessley_pk_bt_' . $id );
 			wp_set_auth_cookie( (int) $request->approver_user_id, false );
-			do_action( 'wp_login', get_userdata( (int) $request->approver_user_id )->user_login, get_userdata( (int) $request->approver_user_id ) );
+			$approver = get_userdata( (int) $request->approver_user_id );
+			if ( $approver ) {
+				// WordPress core's own login hook, fired so other plugins see this as a normal login.
+				do_action( 'wp_login', $approver->user_login, $approver ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- core hook, not one this plugin defines.
+			}
 			Thessley_Passkey_Store::consume_request( $id );
 
 			thessley_log_event( 'passkey-login', 'login_approved', 'noted', 'user #' . (int) $request->approver_user_id );
@@ -665,7 +671,7 @@ class Thessley_Module_Passkey_Login {
 
 	/** Backs the profile page's live refresh after an enroll/revoke, so the device list updates without a full page reload. */
 	public static function rest_devices_html( WP_REST_Request $req ) {
-		return rest_ensure_response( array( 'html' => self::render_devices_list_html( wp_get_current_user() ) ) );
+		return rest_ensure_response( array( 'html' => wp_kses( self::render_devices_list_html( wp_get_current_user() ), self::devices_list_allowed_html() ) ) );
 	}
 
 	public static function rest_enroll_status( WP_REST_Request $req ) {
@@ -682,7 +688,7 @@ class Thessley_Module_Passkey_Login {
 		$response = array( 'status' => $request->status );
 
 		if ( 'approved' === $request->status && $request->credential_id ) {
-			$passkey = Thessley_Passkey_Store::get_passkey_by_credential( self::credential_string_for_row( $request->credential_id ) );
+			$passkey = Thessley_Passkey_Store::get_passkey_by_credential( Thessley_Passkey_Store::get_credential_string_for_row( $request->credential_id ) );
 			$response['label'] = $passkey ? $passkey->label : '';
 		}
 
@@ -761,13 +767,6 @@ class Thessley_Module_Passkey_Login {
 				'username'      => $enrolled_user ? $enrolled_user->user_login : '',
 			)
 		);
-	}
-
-	/** $request->credential_id stores the passkeys.id row id, not the credential_id string — this resolves one to the other for display. */
-	private static function credential_string_for_row( $row_id ) {
-		global $wpdb;
-		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name, not user input.
-		return $wpdb->get_var( $wpdb->prepare( 'SELECT credential_id FROM ' . Thessley_Passkey_Store::passkeys_table() . ' WHERE id = %d', $row_id ) );
 	}
 
 	private static function passkey_row_id( $passkey ) {
@@ -920,7 +919,7 @@ class Thessley_Module_Passkey_Login {
 			wp_die( 'Forbidden', 403 );
 		}
 
-		$posted = (string) ( $_POST['mode'] ?? '' );
+		$posted = isset( $_POST['mode'] ) ? sanitize_key( wp_unslash( $_POST['mode'] ) ) : '';
 		$mode   = in_array( $posted, array( '2fa', 'required' ), true ) ? $posted : 'optional';
 
 		update_option( 'thessley_passkey_mode', $mode );
@@ -975,7 +974,7 @@ class Thessley_Module_Passkey_Login {
 		?>
 		<h2>Passkey devices</h2>
 		<div class="thessley" style="margin-bottom:20px">
-			<div id="thessley-pk-devices-wrap"><?php echo self::render_devices_list_html( $user ); ?></div>
+			<div id="thessley-pk-devices-wrap"><?php echo wp_kses( self::render_devices_list_html( $user ), self::devices_list_allowed_html() ); ?></div>
 
 			<?php if ( get_current_user_id() === (int) $user->ID ) : ?>
 				<div id="thessley-pk-enroll-box" style="margin-top:16px;max-width:300px;padding:20px;border:1px solid #dcdcde;border-radius:6px;background:#fff;text-align:center">
@@ -1093,6 +1092,35 @@ class Thessley_Module_Passkey_Login {
 		<?php
 	}
 
+	/**
+	 * Exactly the markup render_devices_list_html() produces — a table, the
+	 * status badges, and the Revoke button with its data-* attributes —
+	 * and nothing else. Core's wp_kses_post() list has no <button>, so this
+	 * is an explicit allow-list: anything outside it is stripped before the
+	 * markup reaches the page or the refresh endpoint.
+	 */
+	private static function devices_list_allowed_html() {
+		return array(
+			'div'    => array( 'class' => true ),
+			'p'      => array( 'class' => true ),
+			'table'  => array( 'class' => true, 'style' => true ),
+			'thead'  => array(),
+			'tbody'  => array(),
+			'tr'     => array(),
+			'th'     => array(),
+			'td'     => array(),
+			'span'   => array( 'class' => true ),
+			'button' => array(
+				'type'          => true,
+				'class'         => true,
+				'disabled'      => true,
+				'data-id'       => true,
+				'data-user-id'  => true,
+				'data-nonce'    => true,
+			),
+		);
+	}
+
 	/** Renders just the device table (or the empty-state message) — shared by the initial profile-page render and the /passkey/devices refresh endpoint so both stay pixel-identical. */
 	private static function render_devices_list_html( $user ) {
 		$devices = Thessley_Passkey_Store::devices_for_user( $user->ID );
@@ -1147,10 +1175,10 @@ class Thessley_Module_Passkey_Login {
 
 
 	public static function handle_revoke() {
-		$id = (int) ( $_POST['id'] ?? 0 );
+		$id = isset( $_POST['id'] ) ? absint( wp_unslash( $_POST['id'] ) ) : 0;
 		check_admin_referer( 'thessley_pk_revoke_' . $id );
 
-		$target_user_id = (int) ( $_POST['user_id'] ?? 0 );
+		$target_user_id = isset( $_POST['user_id'] ) ? absint( wp_unslash( $_POST['user_id'] ) ) : 0;
 
 		if ( get_current_user_id() !== $target_user_id && ! current_user_can( 'manage_options' ) ) {
 			wp_die( 'Forbidden', 403 );

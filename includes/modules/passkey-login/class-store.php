@@ -8,6 +8,16 @@ if ( ! defined( 'ABSPATH' ) ) {
  * short-lived login/enroll handshake rows. Kept separate from module.php
  * so the REST/crypto/UI wiring there isn't tangled up with SQL.
  */
+// This class is the plugin's data-access layer for its own two custom tables, so
+// every method is a direct query by design, and none of it may be cached:
+// handshake rows and device state are security decisions that must always be
+// read fresh. What the sniffs below cannot see is that the only thing
+// concatenated into a query is a table name built from $wpdb->prefix plus a
+// fixed literal (passkeys_table()/requests_table()); every value that varies
+// goes through $wpdb->prepare() placeholders or $wpdb->insert()/update()
+// format arrays, and nothing here ever interpolates request data.
+// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter
+
 class Thessley_Passkey_Store {
 
 	const DB_VERSION = 2; // v2: thessley_passkeys.attestation_level
@@ -113,10 +123,9 @@ class Thessley_Passkey_Store {
 	public static function get_request( $request_id ) {
 		global $wpdb;
 
-		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- $wpdb->prepare() used directly below.
 		return $wpdb->get_row(
 			$wpdb->prepare(
-				"SELECT * FROM " . self::requests_table() . " WHERE request_id = %s", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name, not user input.
+				"SELECT * FROM " . self::requests_table() . " WHERE request_id = %s",
 				$request_id
 			)
 		);
@@ -176,7 +185,6 @@ class Thessley_Passkey_Store {
 		global $wpdb;
 
 		$wpdb->query(
-			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name, not user input; no other values interpolated.
 			'DELETE FROM ' . self::requests_table() . ' WHERE expires_at < UTC_TIMESTAMP() OR (status != "pending" AND created_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 DAY))'
 		);
 	}
@@ -221,7 +229,6 @@ class Thessley_Passkey_Store {
 	public static function get_passkey_by_credential( $credential_id ) {
 		global $wpdb;
 
-		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name, not user input.
 		return $wpdb->get_row(
 			$wpdb->prepare(
 				'SELECT * FROM ' . self::passkeys_table() . ' WHERE credential_id = %s AND revoked_at IS NULL',
@@ -230,10 +237,21 @@ class Thessley_Passkey_Store {
 		);
 	}
 
+	/** $request->credential_id stores the passkeys.id row id, not the credential_id string — this resolves one to the other (for display). */
+	public static function get_credential_string_for_row( $row_id ) {
+		global $wpdb;
+
+		return $wpdb->get_var(
+			$wpdb->prepare(
+				'SELECT credential_id FROM ' . self::passkeys_table() . ' WHERE id = %d',
+				$row_id
+			)
+		);
+	}
+
 	public static function get_passkey_row_id( $credential_id ) {
 		global $wpdb;
 
-		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name, not user input.
 		return (int) $wpdb->get_var(
 			$wpdb->prepare(
 				'SELECT id FROM ' . self::passkeys_table() . ' WHERE credential_id = %s',
@@ -245,7 +263,6 @@ class Thessley_Passkey_Store {
 	public static function devices_for_user( $user_id ) {
 		global $wpdb;
 
-		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table name, not user input.
 		return $wpdb->get_results(
 			$wpdb->prepare(
 				'SELECT id, credential_id, label, attestation_level, created_at, last_used_at, revoked_at FROM ' . self::passkeys_table() . ' WHERE user_id = %d ORDER BY created_at DESC',
@@ -293,3 +310,5 @@ class Thessley_Passkey_Store {
 		return rtrim( strtr( base64_encode( random_bytes( 32 ) ), '+/', '-_' ), '=' );
 	}
 }
+
+// phpcs:enable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter
