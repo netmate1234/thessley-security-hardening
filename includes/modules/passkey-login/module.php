@@ -369,7 +369,7 @@ class Thessley_Module_Passkey_Login {
 			<h1 style="font-size:1.1em"><?php echo esc_html( get_bloginfo( 'name' ) ); ?></h1>
 			<p>Your password was correct. Confirm with the app to finish logging in.</p>
 			<div id="thessley-2fa-qr" style="display:inline-block;line-height:0;background:#fff;padding:12px;border-radius:4px"></div>
-			<p><a href="<?php echo esc_attr( $app_link ); ?>">Open on this device</a></p>
+			<p><a href="<?php echo esc_attr( $app_link ); ?>" style="display:block;box-sizing:border-box;width:100%;padding:12px 16px;border-radius:4px;background:#2271b1;color:#fff;font-weight:600;text-decoration:none">Open on this device</a></p>
 			<p id="thessley-2fa-status" style="color:#666"></p>
 		</div>
 		<?php
@@ -1153,7 +1153,7 @@ JS;
 			<div id="thessley-passkey-qrwrap"<?php echo $identify ? ' style="display:none"' : ''; ?>>
 				<p class="description">Scan this code with the Thessley Passkey app, or open it on this device.</p>
 				<div id="thessley-passkey-qr" style="display:inline-block;line-height:0;background:#fff;padding:12px;border-radius:4px"></div>
-				<p><a id="thessley-passkey-link" href="#">Open on this device</a></p>
+				<p style="margin:12px 0 0"><a id="thessley-passkey-link" class="button" href="#" style="display:block;box-sizing:border-box;width:100%;text-align:center">Open on this device</a></p>
 				<?php if ( $identify ) : ?>
 					<p><a id="thessley-passkey-change" href="#">Use a different username</a></p>
 				<?php endif; ?>
@@ -1341,7 +1341,12 @@ JS;
 									qrBox.style.display = 'inline-block';
 									qrBox.innerHTML = '';
 									ThessleyQR.render(qrBox, data.app_link, 236);
-									status.innerHTML = '<a href="' + data.app_link + '">Open on this device</a>';
+									var open = document.createElement('a');
+									open.className = 'button button-primary';
+									open.href = data.app_link;
+									open.textContent = 'Open on this device';
+									status.textContent = '';
+									status.appendChild(open);
 
 									var poll = setInterval(function () {
 										fetch(restBase + '/' + data.request_id + '/status', {
