@@ -936,7 +936,18 @@ class Thessley_Module_Passkey_Login {
 			// browser without JavaScript simply keeps the normal password
 			// form instead of being locked out of it; the login script
 			// takes the class off once a username has been entered.
-			echo '<style>html.thessley-pk-step1 #loginform{display:none}</style><script>document.documentElement.classList.add("thessley-pk-step1");</script>';
+			//
+			// Not display:none, on purpose. WordPress's own user-profile.js
+			// (the show/hide-password button) runs on page load and
+			// *disables* any password input that is hidden at that moment,
+			// "to prevent autofill and submission" — and never re-enables
+			// it, so revealing a display:none form later leaves the
+			// password field dead. Collapsing the form to nothing while its
+			// inputs keep their own layout boxes looks the same, is not
+			// "hidden" to that check, and visibility:hidden also keeps the
+			// fields out of tab order and away from screen readers and
+			// autofill until step 2.
+			echo '<style>html.thessley-pk-step1 #loginform{visibility:hidden!important;height:0!important;min-height:0!important;overflow:hidden!important;margin:0!important;padding:0!important;border:0!important;box-shadow:none!important}</style><script>document.documentElement.classList.add("thessley-pk-step1");</script>';
 		}
 	}
 
@@ -1022,7 +1033,7 @@ class Thessley_Module_Passkey_Login {
 			var login = document.getElementById('user_login');
 			var pass  = document.getElementById('user_pass');
 			if (login) { login.value = name; }
-			if (pass) { pass.focus(); }
+			if (pass) { pass.disabled = false; pass.focus(); }
 			// WordPress's own script re-sets (and focuses) the username field
 			// about 200 ms after the page loads, which on a reload can land
 			// after this and blank it again. Put the name back if so — never
@@ -1030,6 +1041,7 @@ class Thessley_Module_Passkey_Login {
 			// in the password field.
 			setTimeout(function () {
 				if (login && !login.value) { login.value = name; }
+				if (pass) { pass.disabled = false; }  // belt and braces: WordPress's own scripts may disable a field that was hidden when they ran
 				if (pass && login && document.activeElement === login) { pass.focus(); }
 			}, 450);
 		}
