@@ -621,10 +621,19 @@ class Thessley_Module_Passkey_Login {
 
 			thessley_log_event( 'passkey-login', 'login_approved', 'noted', 'user #' . (int) $request->approver_user_id );
 
+			// Where wp-login.php would send this user after a password login. Running the same
+			// 'login_redirect' filter means plugins that route particular accounts elsewhere (a
+			// client dashboard page, say) apply to app logins too, instead of everyone landing on
+			// wp-admin.
+			$redirect_to = admin_url();
+			if ( $approver ) {
+				$redirect_to = wp_validate_redirect( apply_filters( 'login_redirect', $redirect_to, '', $approver ), admin_url() ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- core hook, not one this plugin defines.
+			}
+
 			return rest_ensure_response(
 				array(
 					'status'      => 'approved',
-					'redirect_to' => admin_url(),
+					'redirect_to' => $redirect_to,
 				)
 			);
 		}
