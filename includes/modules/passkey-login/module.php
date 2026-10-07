@@ -119,6 +119,34 @@ class Thessley_Module_Passkey_Login {
 		return in_array( $mode, array( 'optional', '2fa', 'required' ), true ) ? $mode : 'optional';
 	}
 
+	/**
+	 * Whether wp-login.php collects the username in a first step, before
+	 * showing the QR. A second site-wide choice on top of mode(), applying
+	 * to the two modes where the app can log you in on its own:
+	 *  - optional: step 1 asks for the username, step 2 shows the password
+	 *              form (username filled in) and the QR together.
+	 *  - required: step 1 asks for the username, step 2 shows the QR only.
+	 * Ignored in '2fa', where the password step already identifies the
+	 * account. Off by default: the QR is then shown straight away and the
+	 * device that approves it is what identifies you (BankID-style).
+	 *
+	 * Enforced server-side, not just by the screen: while this is on,
+	 * /login/start refuses to create a request without a username, and a
+	 * request created for a username can only be approved by that
+	 * account's own devices (see rest_login_respond()) — the same rule a
+	 * 2fa request already follows, so the page can never show one thing
+	 * while the server accepts another.
+	 */
+	public static function identify() {
+		return '2fa' !== self::mode() && (bool) get_option( 'thessley_passkey_identify', false );
+	}
+
+	/** Only the main login form: not lost-password, register, reset-password or the interim-login iframe, where a username box or QR makes no sense. */
+	private static function is_main_login_screen() {
+		$action = isset( $GLOBALS['action'] ) ? $GLOBALS['action'] : 'login';
+		return 'login' === $action && empty( $GLOBALS['interim_login'] );
+	}
+
 	private static function user_has_active_device( $user_id ) {
 		foreach ( Thessley_Passkey_Store::devices_for_user( $user_id ) as $d ) {
 			if ( ! $d->revoked_at ) {
@@ -471,9 +499,39 @@ class Thessley_Module_Passkey_Login {
 			return new WP_Error( 'thessley_rate_limited', 'Too many requests.', array( 'status' => 429 ) );
 		}
 
-		$result             = Thessley_Passkey_Store::create_request( 'login', null, self::LOGIN_TTL );
+		// Anonymous by default: no requester, so whichever enrolled device
+		// approves IS the identification. With the username prompt on, the
+		// request is created *for* the typed account instead.
+		$requester = null;
+		$typed     = '';
+
+		if ( self::identify() ) {
+			$raw   = $req->get_param( 'username' );
+			$typed = is_string( $raw ) ? substr( trim( sanitize_text_field( wp_unslash( $raw ) ) ), 0, 100 ) : '';
+
+			if ( '' === $typed ) {
+				return new WP_Error( 'thessley_bad_request', 'Enter your username.', array( 'status' => 400 ) );
+			}
+
+			$user = get_user_by( 'login', $typed );
+			if ( ! $user && is_email( $typed ) ) {
+				$user = get_user_by( 'email', $typed );
+			}
+
+			// An unknown name gets a real, working-looking request bound to
+			// account 0, which no device can ever match — so the response,
+			// the QR and the polling all look exactly like a genuine
+			// account's, whether or not it exists or has a device. Nothing
+			// here lets anyone find out which usernames are real. The typed
+			// text (not the account's canonical login) goes into the link
+			// for the same reason: echoing the canonical name would turn an
+			// email address into its username.
+			$requester = $user ? (int) $user->ID : 0;
+		}
+
+		$result             = Thessley_Passkey_Store::create_request( 'login', $requester, self::LOGIN_TTL );
 		$result['url']      = self::auth_url( 'login', $result['request_id'] );
-		$result['app_link'] = self::app_link( 'login', $result['request_id'], $result['nonce'], $result['ip'] );
+		$result['app_link'] = self::app_link( 'login', $result['request_id'], $result['nonce'], $result['ip'], $typed );
 
 		self::bind_browser_to_request( $result['request_id'] );
 
@@ -605,12 +663,15 @@ class Thessley_Module_Passkey_Login {
 			return new WP_Error( 'thessley_unknown_device', 'Unknown or revoked device.', array( 'status' => 401 ) );
 		}
 
-		// A 2fa request already knows who's logging in (the password step
-		// identified them) — unlike a plain login request, where whichever
-		// device approves IS the identification. Only that same user's own
-		// device may resolve it.
-		if ( '2fa' === $request->type && (int) $request->requester_user_id !== (int) $passkey->user_id ) {
-			thessley_log_event( 'passkey-login', 'signature_invalid', 'blocked', 'credential ' . $cred_id . ' tried to confirm another user\'s 2fa request' );
+		// A request that already knows who is logging in — a 2fa request (the
+		// password step identified them) or a login started with the
+		// username prompt on — may only be resolved by that same account's
+		// own devices. An anonymous login request (no requester) is the one
+		// kind where whichever device approves IS the identification. A
+		// requester of 0 is the placeholder for a username that doesn't
+		// exist: no device belongs to account 0, so it can never resolve.
+		if ( null !== $request->requester_user_id && (int) $request->requester_user_id !== (int) $passkey->user_id ) {
+			thessley_log_event( 'passkey-login', 'signature_invalid', 'blocked', 'credential ' . $cred_id . ' tried to resolve another account\'s ' . $request->type . ' request' );
 			return new WP_Error( 'thessley_wrong_account', 'This device belongs to a different account.', array( 'status' => 403 ) );
 		}
 
@@ -860,13 +921,27 @@ class Thessley_Module_Passkey_Login {
 	 *              whoever sets this to 'required', not an oversight.
 	 */
 	public static function login_head_styles() {
+		if ( ! self::is_main_login_screen() ) {
+			return;
+		}
+
 		if ( 'required' === self::mode() ) {
 			echo '<style>#loginform{display:none}</style>';
+			return;
+		}
+
+		if ( self::identify() ) {
+			// "Password or the app", username first: the password form waits
+			// for step 1. Hidden by a class that only a script adds, so a
+			// browser without JavaScript simply keeps the normal password
+			// form instead of being locked out of it; the login script
+			// takes the class off once a username has been entered.
+			echo '<style>html.thessley-pk-step1 #loginform{display:none}</style><script>document.documentElement.classList.add("thessley-pk-step1");</script>';
 		}
 	}
 
 	public static function login_page_assets() {
-		if ( '2fa' === self::mode() ) {
+		if ( '2fa' === self::mode() || ! self::is_main_login_screen() ) {
 			return; // password form only — see login_head_styles()'s docblock
 		}
 
@@ -875,38 +950,194 @@ class Thessley_Module_Passkey_Login {
 		wp_register_script( 'thessley-passkey-login', false, array( 'thessley-qr' ), THESSLEY_VERSION, true );
 		wp_enqueue_script( 'thessley-passkey-login' );
 
-		$rest_base = esc_url_raw( rest_url( 'thessley/v1/passkey/login' ) );
+		$config = array(
+			'rest'     => esc_url_raw( rest_url( 'thessley/v1/passkey/login' ) ),
+			'identify' => self::identify(),
+			'optional' => 'optional' === self::mode(),
+		);
 
 		wp_add_inline_script(
 			'thessley-passkey-login',
-			"(function(){\n" .
-			"  var box = document.getElementById('thessley-passkey-box');\n" .
-			"  if (!box) return;\n" .
-			"  fetch('{$rest_base}/start', {method:'POST'}).then(function(r){return r.json();}).then(function(data){\n" .
-			"    ThessleyQR.render(document.getElementById('thessley-passkey-qr'), data.app_link, 270);\n" .
-			"    var linkEl = document.getElementById('thessley-passkey-link');\n" .
-			"    if (linkEl) { linkEl.href = data.app_link; }\n" .
-			"    var poll = setInterval(function(){\n" .
-			"      fetch('{$rest_base}/' + data.request_id + '/status').then(function(r){return r.json();}).then(function(s){\n" .
-			"        if (s.status === 'approved') { clearInterval(poll); window.location.href = s.redirect_to; }\n" .
-			"        if (s.status === 'denied' || s.status === 'expired') { clearInterval(poll); box.textContent = 'Request ' + s.status + ' — refresh to try again.'; }\n" .
-			"      });\n" .
-			"    }, 1500);\n" .
-			"  });\n" .
-			'})();'
+			str_replace( '__THESSLEY_PK_CONFIG__', wp_json_encode( $config, JSON_HEX_TAG | JSON_HEX_AMP ), self::login_script() )
 		);
+	}
+
+	/**
+	 * The login screen's behaviour. Without the username prompt it starts a
+	 * request on load and shows the QR (original behaviour). With it, there
+	 * are two steps:
+	 *   1. a username box — nothing else (for "Password or the app" the
+	 *      password form is held back too);
+	 *   2. the QR for that account — plus, for "Password or the app", the
+	 *      password form with the username filled in.
+	 * A wrong password reloads wp-login.php with the username WordPress
+	 * kept in the form, which carries straight on to step 2.
+	 */
+	private static function login_script() {
+		return <<<'JS'
+(function () {
+	var cfg = __THESSLEY_PK_CONFIG__;
+	var box = document.getElementById('thessley-passkey-box');
+	if (!box) { return; }
+
+	var root     = document.documentElement;
+	var qrEl     = document.getElementById('thessley-passkey-qr');
+	var linkEl   = document.getElementById('thessley-passkey-link');
+	var wrap     = document.getElementById('thessley-passkey-qrwrap');
+	var idForm   = document.getElementById('thessley-passkey-id');
+	var userIn   = document.getElementById('thessley-passkey-username');
+	var changeEl = document.getElementById('thessley-passkey-change');
+	var msg      = document.getElementById('thessley-passkey-msg');
+	var poll = null, lastName = '', gen = 0;
+
+	// WordPress only keeps the typed name in the password form after a wrong
+	// password for an account that exists (it blanks it for an unknown one),
+	// so the name is also remembered for this browser tab, and used only to
+	// carry on after a failed login. Cleared as soon as it is no longer needed.
+	var KEY = 'thessleyPkUser';
+	function remember(n) { try { sessionStorage.setItem(KEY, n); } catch (e) {} }
+	function recall() { try { return sessionStorage.getItem(KEY) || ''; } catch (e) { return ''; } }
+	function forget() { try { sessionStorage.removeItem(KEY); } catch (e) {} }
+
+	function stop() { if (poll) { clearInterval(poll); poll = null; } }
+	function say(text) { msg.textContent = text || ''; }
+
+	// Step 1: ask for the username.
+	function stepOne() {
+		gen++; stop(); say(''); forget();
+		qrEl.innerHTML = '';
+		wrap.style.display = 'none';
+		idForm.style.display = '';
+		if (cfg.optional) { root.classList.add('thessley-pk-step1'); }
+		userIn.focus();
+	}
+
+	// Step 2: the QR (and, for "Password or the app", the password form).
+	function stepTwo(name) {
+		remember(name);
+		idForm.style.display = 'none';
+		wrap.style.display = '';
+		if (cfg.optional) {
+			root.classList.remove('thessley-pk-step1');
+			var login = document.getElementById('user_login');
+			var pass  = document.getElementById('user_pass');
+			if (login) { login.value = name; }
+			if (pass) { pass.focus(); }
+			// WordPress's own script re-sets (and focuses) the username field
+			// about 200 ms after the page loads, which on a reload can land
+			// after this and blank it again. Put the name back if so — never
+			// over anything the user has typed since — and keep the cursor
+			// in the password field.
+			setTimeout(function () {
+				if (login && !login.value) { login.value = name; }
+				if (pass && login && document.activeElement === login) { pass.focus(); }
+			}, 450);
+		}
+	}
+
+	function ended(status) {
+		stop();
+		qrEl.innerHTML = '';
+		say('Request ' + status + '. ');
+		var again = document.createElement('a');
+		again.href = '#';
+		again.textContent = 'Get a new code';
+		again.addEventListener('click', function (e) { e.preventDefault(); begin(lastName); });
+		msg.appendChild(again);
+	}
+
+	function begin(name) {
+		var my = ++gen;
+		stop(); say('');
+		lastName = name || '';
+
+		var opts = { method: 'POST' };
+		if (cfg.identify) {
+			opts.headers = { 'Content-Type': 'application/json' };
+			opts.body = JSON.stringify({ username: name });
+		}
+
+		fetch(cfg.rest + '/start', opts).then(function (r) { return r.json(); }).then(function (data) {
+			if (my !== gen) { return; }
+			if (!data || !data.app_link) {
+				var why = data && data.message ? data.message : 'Could not start the app login. Try again.';
+				if (cfg.identify) { stepOne(); }
+				say(why);
+				return;
+			}
+
+			qrEl.innerHTML = '';
+			ThessleyQR.render(qrEl, data.app_link, 270);
+			linkEl.href = data.app_link;
+			if (cfg.identify) { stepTwo(name); }
+
+			poll = setInterval(function () {
+				fetch(cfg.rest + '/' + data.request_id + '/status').then(function (r) { return r.json(); }).then(function (s) {
+					if (my !== gen) { return; }
+					if (s.status === 'approved') { stop(); forget(); window.location.href = s.redirect_to; }
+					else if (s.status === 'denied' || s.status === 'expired') { ended(s.status); }
+				});
+			}, 1500);
+		}).catch(function () {
+			if (my === gen) { say('Network error. Try again.'); }
+		});
+	}
+
+	if (cfg.identify) {
+		idForm.addEventListener('submit', function (e) {
+			e.preventDefault();
+			var name = userIn.value.trim();
+			if (name) { begin(name); }
+		});
+		changeEl.addEventListener('click', function (e) { e.preventDefault(); stepOne(); });
+
+		// After a wrong password WordPress reloads this page with an error;
+		// carry straight on to step 2 for the same username.
+		var typed   = document.getElementById('user_login');
+		var carried = (typed && typed.value.trim()) || (document.getElementById('login_error') ? recall() : '');
+		if (carried) {
+			userIn.value = carried;
+			begin(carried);
+		} else {
+			forget();
+		}
+	} else {
+		begin('');
+	}
+})();
+JS;
 	}
 
 	/** Hooked to 'login_footer', not 'login_form' — 'login_form' fires inside the password <form>, which both looks wrong and risks the same nested-element problems invalid markup causes elsewhere in this module. */
 	public static function login_form_markup() {
-		if ( '2fa' === self::mode() ) {
+		if ( '2fa' === self::mode() || ! self::is_main_login_screen() ) {
 			return;
 		}
+
+		$identify = self::identify();
 		?>
-		<div id="thessley-passkey-box" style="margin:12px 0;padding:12px;border:1px solid #dcdcde;border-radius:4px;text-align:center">
-			<p class="description">Scan this code with the Thessley Passkey app, or open it on this device.</p>
-			<div id="thessley-passkey-qr" style="display:inline-block;line-height:0;background:#fff;padding:12px;border-radius:4px"></div>
-			<p><a id="thessley-passkey-link" href="#">Open on this device</a></p>
+		<div id="thessley-passkey-box" style="max-width:320px;margin:12px auto;padding:12px;box-sizing:border-box;border:1px solid #dcdcde;border-radius:4px;text-align:center">
+			<?php if ( $identify ) : ?>
+				<?php // Without JavaScript the username box would do nothing; hide the whole box and leave the normal password form (never hidden without a script) as the way in. ?>
+				<noscript><style>#thessley-passkey-box{display:none}</style></noscript>
+				<form id="thessley-passkey-id" novalidate style="margin:0">
+					<p class="description" style="margin-bottom:8px">
+						<?php echo 'optional' === self::mode() ? 'Enter your username to sign in with a password or the Thessley Passkey app.' : 'Enter your username to sign in with the Thessley Passkey app.'; ?>
+					</p>
+					<label for="thessley-passkey-username" class="screen-reader-text">Username or email address</label>
+					<input type="text" id="thessley-passkey-username" name="username" class="input" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="100" placeholder="Username or email address" style="width:100%;box-sizing:border-box;margin:0 0 8px;padding:6px 10px;min-height:40px;font-size:16px;line-height:1.5">
+					<button type="submit" class="button button-primary" style="width:100%">Continue</button>
+				</form>
+			<?php endif; ?>
+			<div id="thessley-passkey-qrwrap"<?php echo $identify ? ' style="display:none"' : ''; ?>>
+				<p class="description">Scan this code with the Thessley Passkey app, or open it on this device.</p>
+				<div id="thessley-passkey-qr" style="display:inline-block;line-height:0;background:#fff;padding:12px;border-radius:4px"></div>
+				<p><a id="thessley-passkey-link" href="#">Open on this device</a></p>
+				<?php if ( $identify ) : ?>
+					<p><a id="thessley-passkey-change" href="#">Use a different username</a></p>
+				<?php endif; ?>
+			</div>
+			<p id="thessley-passkey-msg" role="status" style="margin:8px 0 0"></p>
 		</div>
 		<?php
 	}
@@ -924,12 +1155,20 @@ class Thessley_Module_Passkey_Login {
 
 		update_option( 'thessley_passkey_mode', $mode );
 
+		// Absent when the radios were disabled (the page greys them out in
+		// 'Password, then app' mode, where they don't apply) — leave the
+		// saved choice alone rather than silently resetting it.
+		if ( isset( $_POST['identify'] ) ) {
+			update_option( 'thessley_passkey_identify', '1' === sanitize_text_field( wp_unslash( $_POST['identify'] ) ) ? 1 : 0 );
+		}
+
 		wp_safe_redirect( add_query_arg( 'saved', '1', wp_get_referer() ) );
 		exit;
 	}
 
 	public static function render_page() {
-		$mode = self::mode();
+		$mode     = self::mode();
+		$identify = (bool) get_option( 'thessley_passkey_identify', false ); // the saved choice, even while the current mode ignores it
 
 		Thessley_UI::open( 'passkey-login' );
 
@@ -957,9 +1196,33 @@ class Thessley_Module_Passkey_Login {
 				'Applies to every account with a device enrolled. An account with no device yet always falls back to plain password — there is nothing to confirm with yet.'
 			);
 
+			Thessley_UI::row(
+				'Username prompt',
+				function () use ( $identify ) {
+					?>
+					<label><input type="radio" name="identify" value="0" <?php checked( ! $identify ); ?>> Not asked — the QR is shown straight away, and the app works out who you are</label><br>
+					<label><input type="radio" name="identify" value="1" <?php checked( $identify ); ?>> Ask for the username first — then show the QR for that account</label>
+					<?php
+				},
+				'For “Password or the app” and “App only”. With the prompt, step 1 is just a username box; step 2 shows the QR (and, for “Password or the app”, the password form with the username filled in). Only that account’s own devices can then approve the QR, and an unknown username looks exactly like a real one — nothing reveals which accounts exist or have a device. Not used by “Password, then app”: the password step already tells the site who you are.'
+			);
+
 			submit_button( 'Save settings' );
 			?>
 		</form>
+		<script>
+		( function () {
+			var modes = document.querySelectorAll( 'input[name="mode"]' );
+			var asks  = document.querySelectorAll( 'input[name="identify"]' );
+			function sync() {
+				var picked = document.querySelector( 'input[name="mode"]:checked' );
+				var off    = picked && '2fa' === picked.value;
+				asks.forEach( function ( a ) { a.disabled = off; } );
+			}
+			modes.forEach( function ( m ) { m.addEventListener( 'change', sync ); } );
+			sync();
+		}() );
+		</script>
 		<?php
 		Thessley_UI::section_end();
 		Thessley_UI::close();
