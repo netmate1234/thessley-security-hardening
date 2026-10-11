@@ -923,11 +923,16 @@ class Thessley_Module_Passkey_Login {
 	 *              enough to finish a login for a 2fa account. That
 	 *              enforcement lives server-side, not in this screen, but
 	 *              there's no reason to invite the attempt either.
-	 *  - required: QR only, already polling, password form hidden by CSS
-	 *              — nothing else on the page. An account with no device
-	 *              yet still technically needs a password to get in, with
-	 *              no UI route to it here; that's a deliberate choice by
-	 *              whoever sets this to 'required', not an oversight.
+	 *  - required: QR only, already polling, password form hidden — but
+	 *              reachable via a "Can't access your device?" link below
+	 *              the QR (see login_form_markup()). That link exists only
+	 *              because effective_mode_for_user() already lets a
+	 *              deviceless account's password through server-side
+	 *              (maybe_block_password_login()); without a UI path to it,
+	 *              a lost/revoked-only-device account would have no way to
+	 *              ever reach the field that already works for them. An
+	 *              account that still has an active device gets WordPress's
+	 *              normal "Password login is disabled" error if it tries.
 	 */
 	public static function login_head_styles() {
 		if ( ! self::is_main_login_screen() ) {
@@ -935,7 +940,15 @@ class Thessley_Module_Passkey_Login {
 		}
 
 		if ( 'required' === self::mode() ) {
-			echo '<style>#loginform{display:none}</style>';
+			// Hidden by default, same visibility technique as the identify()
+			// branch below and for the same reason — WordPress's own
+			// show/hide-password script permanently disables a field that
+			// was display:none at load, so visibility:hidden is used
+			// instead, toggled by a class a script adds. A no-JS browser
+			// never gets the class added, so it simply keeps the normal,
+			// visible password form (safe — the server enforces this mode
+			// either way).
+			echo '<style>html.thessley-pk-hide-pw #loginform{visibility:hidden!important;height:0!important;min-height:0!important;overflow:hidden!important;margin:0!important;padding:0!important;border:0!important;box-shadow:none!important}</style><script>document.documentElement.classList.add("thessley-pk-hide-pw");</script>';
 			return;
 		}
 
@@ -1007,6 +1020,7 @@ class Thessley_Module_Passkey_Login {
 	var idForm   = document.getElementById('thessley-passkey-id');
 	var userIn   = document.getElementById('thessley-passkey-username');
 	var changeEl = document.getElementById('thessley-passkey-change');
+	var recoverEl = document.getElementById('thessley-passkey-recover');
 	var msg      = document.getElementById('thessley-passkey-msg');
 	var poll = null, lastName = '', gen = 0;
 
@@ -1104,6 +1118,20 @@ class Thessley_Module_Passkey_Login {
 		});
 	}
 
+	// 'required' mode only: reveal the real password form. Safe regardless
+	// of which account types it in — maybe_block_password_login() still
+	// rejects any account that has an active device.
+	if (recoverEl) {
+		recoverEl.addEventListener('click', function (e) {
+			e.preventDefault();
+			stop();
+			root.classList.remove('thessley-pk-hide-pw');
+			box.style.display = 'none';
+			var login = document.getElementById('user_login');
+			if (login) { login.focus(); }
+		});
+	}
+
 	if (cfg.identify) {
 		idForm.addEventListener('submit', function (e) {
 			e.preventDefault();
@@ -1158,6 +1186,9 @@ JS;
 					<p><a id="thessley-passkey-change" href="#">Use a different username</a></p>
 				<?php endif; ?>
 			</div>
+			<?php if ( 'required' === self::mode() ) : ?>
+				<p><a id="thessley-passkey-recover" href="#">Can't access your device? Sign in with a password instead</a></p>
+			<?php endif; ?>
 			<p id="thessley-passkey-msg" role="status" style="margin:8px 0 0"></p>
 		</div>
 		<?php
