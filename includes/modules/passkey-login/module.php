@@ -354,8 +354,14 @@ class Thessley_Module_Passkey_Login {
 	 */
 	private static function register_qr_scripts() {
 		if ( ! wp_script_is( 'thessley-qrcode-generator', 'registered' ) ) {
-			wp_register_script( 'thessley-qrcode-generator', THESSLEY_PLUGIN_URL . 'assets/vendor/qrcode-generator.js', array(), THESSLEY_VERSION, true );
-			wp_register_script( 'thessley-qr', THESSLEY_PLUGIN_URL . 'assets/thessley-qr.js', array( 'thessley-qrcode-generator' ), THESSLEY_VERSION, true );
+			// Versioned by file time so a change to just these files (e.g. the QR
+			// sizing) is not hidden behind a cached copy under the same ?ver=.
+			$gen_path = THESSLEY_PLUGIN_DIR . 'assets/vendor/qrcode-generator.js';
+			$qr_path  = THESSLEY_PLUGIN_DIR . 'assets/thessley-qr.js';
+			$gen_ver  = file_exists( $gen_path ) ? (string) filemtime( $gen_path ) : THESSLEY_VERSION;
+			$qr_ver   = file_exists( $qr_path ) ? (string) filemtime( $qr_path ) : THESSLEY_VERSION;
+			wp_register_script( 'thessley-qrcode-generator', THESSLEY_PLUGIN_URL . 'assets/vendor/qrcode-generator.js', array(), $gen_ver, true );
+			wp_register_script( 'thessley-qr', THESSLEY_PLUGIN_URL . 'assets/thessley-qr.js', array( 'thessley-qrcode-generator' ), $qr_ver, true );
 		}
 	}
 
@@ -376,7 +382,7 @@ class Thessley_Module_Passkey_Login {
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width,initial-scale=1">
 		<title><?php echo esc_html( get_bloginfo( 'name' ) ); ?> — confirm login</title>
-		<div style="max-width:360px;margin:40px auto;padding:16px;font-family:sans-serif;text-align:center">
+		<div style="box-sizing:border-box;max-width:360px;margin:40px auto;padding:16px;font-family:sans-serif;text-align:center">
 			<h1 style="font-size:1.1em"><?php echo esc_html( get_bloginfo( 'name' ) ); ?></h1>
 			<p>Your password was correct. Confirm with the app to finish logging in.</p>
 			<div id="thessley-2fa-qr" style="display:inline-block;line-height:0;background:#fff;padding:12px;border-radius:4px"></div>
