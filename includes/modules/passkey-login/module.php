@@ -927,7 +927,12 @@ class Thessley_Module_Passkey_Login {
 		// wp-thessley-* pages) so the device list below can use the same
 		// Thessley_UI::badge() house style as the rest of the plugin
 		// instead of plain table text.
-		wp_enqueue_style( 'thessley-admin', THESSLEY_PLUGIN_URL . 'assets/admin.css', array(), THESSLEY_VERSION );
+		// Versioned by file time, like the plugin's own pages: with the plugin
+		// version alone a phone (or CDN) keeps serving a stale stylesheet after
+		// an update that only changed the CSS, e.g. the device cards.
+		$css_path = THESSLEY_PLUGIN_DIR . 'assets/admin.css';
+		$css_ver  = file_exists( $css_path ) ? (string) filemtime( $css_path ) : THESSLEY_VERSION;
+		wp_enqueue_style( 'thessley-admin', THESSLEY_PLUGIN_URL . 'assets/admin.css', array(), $css_ver );
 	}
 
 	/**
