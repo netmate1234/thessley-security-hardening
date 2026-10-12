@@ -107,3 +107,21 @@
 	.thessley-row { flex-direction:column; gap:6px; }
 	.thessley-row__label { flex:none; }
 }
+
+/* Passkey devices (profile page): a table on wide screens, one card per device on narrow ones. */
+@media screen and (max-width:782px) {
+	.thessley-pk-devices, .thessley-pk-devices tbody, .thessley-pk-devices tr, .thessley-pk-devices td { display:block; width:100%; box-sizing:border-box; }
+	.thessley-pk-devices { max-width:none !important; border:0; background:none; box-shadow:none; }
+	.thessley-pk-devices thead { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
+	.thessley-pk-devices tr { margin:0 0 12px; padding:4px 14px; border:1px solid #dcdcde; border-radius:8px; background:#fff !important; }
+	.thessley-pk-devices tr.thessley-pk-revoked { opacity:.65; }
+	.thessley-pk-devices td { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:9px 0; border-bottom:1px solid #f0f0f1; text-align:right; word-break:break-word; }
+	.thessley-pk-devices td::before { content:attr(data-label); flex:0 0 auto; font-weight:600; text-align:left; color:#50575e; }
+	.thessley-pk-devices td.thessley-pk-name { display:block; padding-top:12px; font-size:1.1em; font-weight:600; text-align:left; }
+	.thessley-pk-devices td.thessley-pk-name::before { content:none; }
+	.thessley-pk-devices td.thessley-pk-actions { display:block; padding:12px 0 8px; border-bottom:0; }
+	.thessley-pk-devices td.thessley-pk-actions::before { content:none; }
+	.thessley-pk-devices tr.thessley-pk-revoked td.thessley-pk-actions { display:none; }
+	.thessley-pk-devices td.thessley-pk-actions .button { width:100%; margin:0; min-height:40px; box-sizing:border-box; }
+	.thessley-pk-devices tr.thessley-pk-revoked td:nth-last-child(2) { border-bottom:0; }
+}

@@ -1454,9 +1454,9 @@ JS;
 			'table'  => array( 'class' => true, 'style' => true ),
 			'thead'  => array(),
 			'tbody'  => array(),
-			'tr'     => array(),
+			'tr'     => array( 'class' => true ),
 			'th'     => array(),
-			'td'     => array(),
+			'td'     => array( 'class' => true, 'data-label' => true ),
 			'span'   => array( 'class' => true ),
 			'button' => array(
 				'type'          => true,
@@ -1495,24 +1495,25 @@ JS;
 				);
 				?>
 				<?php foreach ( $devices as $d ) : ?>
-					<?php list( $att_tone, $att_icon, $att_label ) = $attestation_meta[ $d->attestation_level ?? '' ] ?? array( 'quiet', 'editor-help', 'Unverified' ); ?>
-					<tr>
-						<td><?php echo esc_html( $d->label ?: 'Unnamed device' ); ?></td>
-						<td><?php echo esc_html( mysql2date( 'M j, Y', $d->created_at ) ); ?></td>
-						<td><?php echo $d->last_used_at ? esc_html( mysql2date( 'M j, Y H:i', $d->last_used_at ) ) : '—'; ?></td>
-						<td><?php Thessley_UI::badge( $d->revoked_at ? 'Revoked' : 'Active', $d->revoked_at ? 'bad' : 'good', $d->revoked_at ? 'dismiss' : 'yes-alt' ); ?></td>
-						<td><?php Thessley_UI::badge( $att_label, $att_tone, $att_icon ); ?></td>
-						<td>
-							<?php if ( ! $d->revoked_at && ( get_current_user_id() === (int) $user->ID || current_user_can( 'manage_options' ) ) ) : ?>
-								<?php // No <form> here — nested forms inside profile.php/user-edit.php break WordPress core's own nonce check; the click handler further up uses fetch() instead. ?>
-								<button type="button" class="button button-small thessley-pk-revoke-btn"
-									data-id="<?php echo esc_attr( $d->id ); ?>"
-									data-user-id="<?php echo esc_attr( $user->ID ); ?>"
-									data-nonce="<?php echo esc_attr( wp_create_nonce( 'thessley_pk_revoke_' . $d->id ) ); ?>">Revoke</button>
-							<?php endif; ?>
-						</td>
-					</tr>
-				<?php endforeach; ?>
+						<?php list( $att_tone, $att_icon, $att_label ) = $attestation_meta[ $d->attestation_level ?? '' ] ?? array( 'quiet', 'editor-help', 'Unverified' ); ?>
+						<?php // data-label feeds the mobile card layout (assets/admin.css): below 783px each row becomes a card and the cell's label is shown as its caption. ?>
+						<tr class="<?php echo $d->revoked_at ? 'thessley-pk-revoked' : ''; ?>">
+							<td class="thessley-pk-name" data-label="Label"><?php echo esc_html( $d->label ?: 'Unnamed device' ); ?></td>
+							<td data-label="Added"><?php echo esc_html( mysql2date( 'M j, Y', $d->created_at ) ); ?></td>
+							<td data-label="Last used"><?php echo $d->last_used_at ? esc_html( mysql2date( 'M j, Y H:i', $d->last_used_at ) ) : '—'; ?></td>
+							<td data-label="Status"><?php Thessley_UI::badge( $d->revoked_at ? 'Revoked' : 'Active', $d->revoked_at ? 'bad' : 'good', $d->revoked_at ? 'dismiss' : 'yes-alt' ); ?></td>
+							<td data-label="Security"><?php Thessley_UI::badge( $att_label, $att_tone, $att_icon ); ?></td>
+							<td class="thessley-pk-actions">
+								<?php if ( ! $d->revoked_at && ( get_current_user_id() === (int) $user->ID || current_user_can( 'manage_options' ) ) ) : ?>
+									<?php // No <form> here — nested forms inside profile.php/user-edit.php break WordPress core's own nonce check; the click handler further up uses fetch() instead. ?>
+									<button type="button" class="button button-small thessley-pk-revoke-btn"
+										data-id="<?php echo esc_attr( $d->id ); ?>"
+										data-user-id="<?php echo esc_attr( $user->ID ); ?>"
+										data-nonce="<?php echo esc_attr( wp_create_nonce( 'thessley_pk_revoke_' . $d->id ) ); ?>">Revoke</button>
+								<?php endif; ?>
+							</td>
+						</tr>
+					<?php endforeach; ?>
 				</tbody>
 			</table>
 			</div>
