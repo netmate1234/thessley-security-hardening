@@ -1662,7 +1662,7 @@ JS;
 				// module's status badges.
 				$attestation_meta = array(
 					'strongbox' => array( 'good', 'shield', 'StrongBox hardware' ),
-					'tpm'       => array( 'good', 'hardware', 'TPM 2.0 hardware' ),
+					'tpm'       => array( 'good', 'desktop', 'TPM 2.0 hardware' ),
 					'tee'       => array( 'good', 'lock', 'TEE hardware' ),
 					'software'  => array( 'warn', 'shield-alt', 'Software only' ),
 				);
