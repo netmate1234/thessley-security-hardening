@@ -111,7 +111,7 @@
 /* Passkey devices (profile page): a table on wide screens, one card per device on narrow ones. */
 @media screen and (max-width:782px) {
 	.thessley-pk-devices, .thessley-pk-devices tbody, .thessley-pk-devices tr, .thessley-pk-devices td { display:block; width:100%; box-sizing:border-box; }
-	.thessley-pk-devices { max-width:none !important; border:0; background:none; box-shadow:none; }
+	.thessley-pk-devices { max-width:none !important; border:0; background:none; box-shadow:none; padding:2px; }
 	.thessley-pk-devices thead { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
 	.thessley-pk-devices tr { margin:0 0 12px; padding:4px 14px; border:1px solid #dcdcde; border-radius:8px; background:#fff !important; }
 	.thessley-pk-devices tr.thessley-pk-revoked { opacity:.65; }

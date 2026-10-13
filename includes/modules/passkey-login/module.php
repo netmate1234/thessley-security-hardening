@@ -340,7 +340,7 @@ class Thessley_Module_Passkey_Login {
 		printf(
 			'<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>%1$s</title>' .
 			'<p>Open this on the device with the Thessley Passkey app installed to continue.</p>' .
-			'<p><a href="%2$s">Get the app</a></p>',
+			'<p><a href="%2$s">Get the Thessley Passkey app</a></p>',
 			esc_html( get_bloginfo( 'name' ) ),
 			esc_url( 'https://play.google.com/store/apps/details?id=' . self::app_package_id() )
 		);
@@ -726,7 +726,7 @@ class Thessley_Module_Passkey_Login {
 			thessley_log_event( 'passkey-login', 'anonymous_login_blocked', 'blocked', 'credential ' . $cred_id . ' — account requires password first' );
 			return new WP_Error(
 				'thessley_2fa_required',
-				'This account requires your password first — log in with it, then confirm with the app.',
+				'This account requires your password first — log in with it, then confirm with the Thessley Passkey app.',
 				array( 'status' => 403 )
 			);
 		}
@@ -1135,7 +1135,7 @@ class Thessley_Module_Passkey_Login {
 		fetch(cfg.rest + '/start', opts).then(function (r) { return r.json(); }).then(function (data) {
 			if (my !== gen) { return; }
 			if (!data || !data.app_link) {
-				var why = data && data.message ? data.message : 'Could not start the app login. Try again.';
+				var why = data && data.message ? data.message : 'Could not start the Thessley Passkey app login. Try again.';
 				if (cfg.identify) { stepOne(); }
 				say(why);
 				return;
@@ -1279,9 +1279,9 @@ JS;
 				'Login method',
 				function () use ( $mode ) {
 					?>
-					<label><input type="radio" name="mode" value="optional" <?php checked( 'optional', $mode ); ?>> Password or the app — password form and QR shown together</label><br>
-					<label><input type="radio" name="mode" value="2fa" <?php checked( '2fa', $mode ); ?>> Password, then app — password first, the app confirms it afterward</label><br>
-					<label><input type="radio" name="mode" value="required" <?php checked( 'required', $mode ); ?>> App only — QR only, no password form</label>
+					<label><input type="radio" name="mode" value="optional" <?php checked( 'optional', $mode ); ?>> Password or the Thessley Passkey app — password form and QR shown together</label><br>
+					<label><input type="radio" name="mode" value="2fa" <?php checked( '2fa', $mode ); ?>> Password, then the Thessley Passkey app — password first, the app then confirms it</label><br>
+					<label><input type="radio" name="mode" value="required" <?php checked( 'required', $mode ); ?>> Thessley Passkey app only — QR only, no password form</label>
 					<?php
 				},
 				'Applies to every account with a device enrolled. An account with no device yet always falls back to plain password — there is nothing to confirm with yet.'
@@ -1291,11 +1291,11 @@ JS;
 				'Username prompt',
 				function () use ( $identify ) {
 					?>
-					<label><input type="radio" name="identify" value="0" <?php checked( ! $identify ); ?>> Not asked — the QR is shown straight away, and the app works out who you are</label><br>
+					<label><input type="radio" name="identify" value="0" <?php checked( ! $identify ); ?>> Not asked — the QR is shown straight away, and the Thessley Passkey app works out who you are</label><br>
 					<label><input type="radio" name="identify" value="1" <?php checked( $identify ); ?>> Ask for the username first — then show the QR for that account</label>
 					<?php
 				},
-				'For “Password or the app” and “App only”. With the prompt, step 1 is just a username box; step 2 shows the QR (and, for “Password or the app”, the password form with the username filled in). Only that account’s own devices can then approve the QR, and an unknown username looks exactly like a real one — nothing reveals which accounts exist or have a device. Not used by “Password, then app”: the password step already tells the site who you are.'
+				'For “Password or the Thessley Passkey app” and “Thessley Passkey app only”. With the prompt, step 1 is just a username box; step 2 shows the QR (and, for “Password or the Thessley Passkey app”, the password form with the username filled in). Only that account’s own devices can then approve the QR, and an unknown username looks exactly like a real one — nothing reveals which accounts exist or have a device. Not used by “Password, then the Thessley Passkey app”: the password step already tells the site who you are.'
 			);
 
 			submit_button( 'Save settings' );
@@ -1336,7 +1336,7 @@ JS;
 				$enroll_hint_by_mode = array(
 					'optional' => "Add a new device to sign in without a password.",
 					'2fa'      => 'Add a new device to confirm logins with, after your password.',
-					'required' => 'Add a new device — the app is the only way to sign in.',
+					'required' => 'Add a new device — the Thessley Passkey app is the only way to sign in.',
 				);
 				?>
 				<p id="thessley-pk-enroll-hint" class="description" style="margin:0 0 14px"><?php echo esc_html( $enroll_hint_by_mode[ self::mode() ] ?? $enroll_hint_by_mode['optional'] ); ?></p>
@@ -1577,11 +1577,7 @@ JS;
 
 			return new WP_Error(
 				'thessley_passkey_required',
-				sprintf(
-					/* translators: %s: site name */
-					__( '<strong>Password login is disabled for this account.</strong> Use the %s app to log in.', 'thessley-security-hardening' ),
-					esc_html( get_bloginfo( 'name' ) )
-				)
+				__( '<strong>Password login is disabled for this account.</strong> Use the Thessley Passkey app to log in.', 'thessley-security-hardening' )
 			);
 		}
 
@@ -1607,11 +1603,7 @@ JS;
 
 			return new WP_Error(
 				'thessley_passkey_2fa_required',
-				sprintf(
-					/* translators: %s: site name */
-					__( '<strong>This account requires app confirmation.</strong> Log in through the website and use the %s app to finish.', 'thessley-security-hardening' ),
-					esc_html( get_bloginfo( 'name' ) )
-				)
+				__( '<strong>This account requires confirmation with the Thessley Passkey app.</strong> Log in through the website and use the Thessley Passkey app to finish.', 'thessley-security-hardening' )
 			);
 		}
 
@@ -1619,7 +1611,7 @@ JS;
 
 		self::bind_browser_to_request( $result['request_id'] );
 
-		thessley_log_event( 'passkey-login', 'password_step_ok', 'noted', 'user #' . $user->ID . ' — awaiting app confirmation' );
+		thessley_log_event( 'passkey-login', 'password_step_ok', 'noted', 'user #' . $user->ID . ' — awaiting Thessley Passkey app confirmation' );
 
 		wp_safe_redirect( self::auth_url( '2fa', $result['request_id'] ) );
 		exit;
