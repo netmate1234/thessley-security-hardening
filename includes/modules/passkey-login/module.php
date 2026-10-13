@@ -6,6 +6,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 require_once __DIR__ . '/class-store.php';
 require_once __DIR__ . '/class-crypto.php';
 require_once __DIR__ . '/class-attestation.php';
+require_once __DIR__ . '/class-tpm.php';
 
 /**
  * Passwordless login via a companion Android app, BankID-style:
@@ -484,6 +485,18 @@ class Thessley_Module_Passkey_Login {
 			)
 		);
 
+		// Optional step for a device whose key lives in a TPM: prove the chip is genuine before enrolling.
+		// Open like enroll/respond (the pending enrolment request is the capability), rate limited.
+		register_rest_route(
+			'thessley/v1',
+			'/passkey/enroll/(?P<id>[\w-]+)/tpm-challenge',
+			array(
+				'methods'             => 'POST',
+				'callback'            => array( __CLASS__, 'rest_enroll_tpm_challenge' ),
+				'permission_callback' => '__return_true',
+			)
+		);
+
 		register_rest_route(
 			'thessley/v1',
 			'/passkey/enroll/(?P<id>[\w-]+)/respond',
@@ -792,6 +805,139 @@ class Thessley_Module_Passkey_Login {
 		return rest_ensure_response( $response );
 	}
 
+	/** The TPM manufacturer roots we trust: every tpm-roots/*.pem shipped with this module. */
+	private static function tpm_root_files() {
+		$files = glob( __DIR__ . '/tpm-roots/*.pem' );
+		return $files ? $files : array();
+	}
+
+	public static function rest_enroll_tpm_challenge( WP_REST_Request $req ) {
+		if ( self::rate_limited( 'enroll_tpm' ) ) {
+			return new WP_Error( 'thessley_rate_limited', 'Too many requests.', array( 'status' => 429 ) );
+		}
+
+		$id      = $req->get_param( 'id' );
+		$request = Thessley_Passkey_Store::get_request( $id );
+		if ( ! $request || 'enroll' !== $request->type || 'pending' !== $request->status
+			|| strtotime( $request->expires_at . ' UTC' ) < time() ) {
+			return new WP_Error( 'thessley_expired', 'This request is no longer valid.', array( 'status' => 409 ) );
+		}
+
+		$certs = $req->get_param( 'ek_certs' );
+		$ak    = $req->get_param( 'ak_public' );
+		if ( ! is_array( $certs ) || ! is_string( $ak ) || strlen( $ak ) > 1024 ) {
+			return new WP_Error( 'thessley_bad_request', 'Missing TPM details.', array( 'status' => 400 ) );
+		}
+
+		$ders = array();
+		foreach ( $certs as $c ) {
+			$der = is_string( $c ) ? base64_decode( $c, true ) : false; // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- decoding binary certificate data.
+			if ( false === $der ) {
+				return self::tpm_refused( 'bad certificate' );
+			}
+			$ders[] = $der;
+		}
+		$ak_public = base64_decode( $ak, true ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- decoding binary key data.
+		if ( false === $ak_public || '' === $ak_public ) {
+			return self::tpm_refused( 'bad attestation key' );
+		}
+
+		$ek = Thessley_Passkey_Tpm::verify_ek_chain( $ders, self::tpm_root_files() );
+		if ( null === $ek ) {
+			return self::tpm_refused( 'the TPM certificate chain is not one we trust' );
+		}
+
+		try {
+			$info = Thessley_Passkey_Tpm::parse_public( $ak_public );
+			$need = Thessley_Passkey_Tpm::ATTR_FIXEDTPM | Thessley_Passkey_Tpm::ATTR_FIXEDPARENT | Thessley_Passkey_Tpm::ATTR_RESTRICTED | Thessley_Passkey_Tpm::ATTR_SIGN;
+			if ( ( $info['attributes'] & $need ) !== $need ) {
+				return self::tpm_refused( 'attestation key is not a restricted signing key' );
+			}
+			$secret = random_bytes( 32 );
+			$cred   = Thessley_Passkey_Tpm::make_credential( $ek['x'], $ek['y'], Thessley_Passkey_Tpm::name( $ak_public ), $secret );
+		} catch ( Exception $e ) {
+			return self::tpm_refused( 'could not build the challenge' );
+		}
+
+		set_transient(
+			'thessley_pk_tpm_' . $id,
+			array(
+				'ak'     => hash( 'sha256', $ak_public ),
+				'secret' => hash( 'sha256', $secret ),
+				'maker'  => $ek['manufacturer'],
+				'model'  => $ek['model'],
+			),
+			300
+		);
+
+		return rest_ensure_response(
+			array(
+				'credential_blob' => base64_encode( $cred['credential_blob'] ), // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode -- binary TPM structure on the wire.
+				'secret'          => base64_encode( $cred['secret'] ), // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode -- binary TPM structure on the wire.
+			)
+		);
+	}
+
+	private static function tpm_refused( $reason ) {
+		thessley_log_event( 'passkey-login', 'tpm_challenge_refused', 'blocked', $reason );
+		return new WP_Error( 'thessley_tpm_unverified', 'The TPM could not be verified: ' . $reason . '.', array( 'status' => 400 ) );
+	}
+
+	/**
+	 * Step 2: check the device's proof that its signing key lives in the TPM challenged earlier.
+	 *
+	 * @return array ok (bool), reason, maker, model.
+	 */
+	private static function verify_tpm( $request_id, $nonce, $public_key_b64, array $t ) {
+		$state = get_transient( 'thessley_pk_tpm_' . $request_id );
+		delete_transient( 'thessley_pk_tpm_' . $request_id ); // one challenge, one attempt.
+		if ( ! is_array( $state ) ) {
+			return array(
+				'ok'     => false,
+				'reason' => 'no challenge was issued',
+			);
+		}
+		$field = static function ( $key ) use ( $t ) {
+			return isset( $t[ $key ] ) && is_string( $t[ $key ] ) ? base64_decode( $t[ $key ], true ) : false; // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- decoding binary TPM structures.
+		};
+		$ak        = $field( 'ak_public' );
+		$activated = $field( 'activated_secret' );
+		$attest    = $field( 'certify_info' );
+		$sig       = $field( 'certify_signature' );
+		$key_pub   = $field( 'key_public' );
+		$spki      = base64_decode( $public_key_b64, true ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- decoding the public key.
+		if ( in_array( false, array( $ak, $activated, $attest, $sig, $key_pub, $spki ), true ) ) {
+			return array(
+				'ok'     => false,
+				'reason' => 'incomplete proof',
+			);
+		}
+		if ( ! hash_equals( $state['ak'], hash( 'sha256', $ak ) ) ) {
+			return array(
+				'ok'     => false,
+				'reason' => 'a different attestation key than the one challenged',
+			);
+		}
+		if ( ! hash_equals( $state['secret'], hash( 'sha256', $activated ) ) ) {
+			return array(
+				'ok'     => false,
+				'reason' => 'activation secret does not match (the key and the TPM certificate are not in the same chip)',
+			);
+		}
+		$reason = Thessley_Passkey_Tpm::verify_certification( $ak, $attest, $sig, $key_pub, $nonce, $spki );
+		if ( null !== $reason ) {
+			return array(
+				'ok'     => false,
+				'reason' => $reason,
+			);
+		}
+		return array(
+			'ok'    => true,
+			'maker' => $state['maker'],
+			'model' => $state['model'],
+		);
+	}
+
 	public static function rest_enroll_respond( WP_REST_Request $req ) {
 		if ( self::rate_limited( 'enroll_respond' ) ) {
 			return new WP_Error( 'thessley_rate_limited', 'Too many requests.', array( 'status' => 429 ) );
@@ -840,7 +986,21 @@ class Thessley_Module_Passkey_Login {
 
 		thessley_log_event( 'passkey-login', 'enroll_approved', 'noted', 'user #' . (int) $request->requester_user_id . ' added device "' . sanitize_text_field( $label ) . '"' );
 		self::notify_device_enrolled( (int) $request->requester_user_id, $label );
-		self::record_attestation( $row_id, $attestation_chain, $request->nonce, $public_key );
+		$level = '';
+		$tpm   = $req->get_param( 'tpm' );
+		if ( is_array( $tpm ) ) {
+			$result = self::verify_tpm( $id, $request->nonce, $public_key, $tpm );
+			if ( $result['ok'] ) {
+				Thessley_Passkey_Store::set_attestation_level( $row_id, 'tpm' );
+				thessley_log_event( 'passkey-login', 'attestation_verified', 'noted', 'device #' . $row_id . ': tpm (' . trim( $result['maker'] . ' ' . $result['model'] ) . ')' );
+				$level = 'tpm';
+			} else {
+				Thessley_Passkey_Store::set_attestation_level( $row_id, null );
+				thessley_log_event( 'passkey-login', 'attestation_unverified', 'noted', 'device #' . $row_id . ': tpm: ' . $result['reason'] );
+			}
+		} else {
+			self::record_attestation( $row_id, $attestation_chain, $request->nonce, $public_key );
+		}
 
 		// The app needs this for every future login/respond call — it has
 		// no other way to learn the server-assigned credential_id, since
@@ -862,6 +1022,7 @@ class Thessley_Module_Passkey_Login {
 				'result'        => 'ok',
 				'credential_id' => $credential_id,
 				'username'      => $enrolled_user ? $enrolled_user->user_login : '',
+				'attestation'   => $level,
 			)
 		);
 	}
@@ -1501,6 +1662,7 @@ JS;
 				// module's status badges.
 				$attestation_meta = array(
 					'strongbox' => array( 'good', 'shield', 'StrongBox hardware' ),
+					'tpm'       => array( 'good', 'hardware', 'TPM 2.0 hardware' ),
 					'tee'       => array( 'good', 'lock', 'TEE hardware' ),
 					'software'  => array( 'warn', 'shield-alt', 'Software only' ),
 				);
