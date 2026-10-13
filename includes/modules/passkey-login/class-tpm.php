@@ -199,6 +199,11 @@ class Thessley_Passkey_Tpm {
 			}
 		}
 		if ( true !== $ok ) {
+			// OpenSSL links certificates by issuer name. AMD's do not match by name (Sunnyvale vs Santa Clara)
+			// but by key identifier, so try that, with the same trust anchor and signature checks.
+			$ok = self::verify_chain_by_key_id( $der_certs, $root_files );
+		}
+		if ( true !== $ok ) {
 			return null;
 		}
 
@@ -228,6 +233,187 @@ class Thessley_Passkey_Tpm {
 			'manufacturer' => $maker,
 			'model'        => $model,
 		);
+	}
+
+	/** Signature algorithms accepted when linking a chain by key identifier. */
+	const CHAIN_SIG_ALGOS = array(
+		'1.2.840.10045.4.3.2'   => OPENSSL_ALGO_SHA256, // ecdsa-with-SHA256.
+		'1.2.840.10045.4.3.3'   => OPENSSL_ALGO_SHA384, // ecdsa-with-SHA384.
+		'1.2.840.113549.1.1.11' => OPENSSL_ALGO_SHA256, // sha256WithRSAEncryption.
+	);
+
+	/**
+	 * One DER element at $off: its tag, where its content starts and where it ends.
+	 *
+	 * @param string $der Buffer.
+	 * @param int    $off Offset of the element.
+	 * @return array|null array( tag, content_start, end ), or null when malformed.
+	 */
+	protected static function der_element( $der, $off ) {
+		$total = strlen( $der );
+		if ( $off + 2 > $total ) {
+			return null;
+		}
+		$tag = ord( $der[ $off ] );
+		$len = ord( $der[ $off + 1 ] );
+		$pos = $off + 2;
+		if ( $len & 0x80 ) {
+			$n = $len & 0x7F;
+			if ( $n < 1 || $n > 3 || $pos + $n > $total ) {
+				return null;
+			}
+			$len = 0;
+			for ( $i = 0; $i < $n; $i++ ) {
+				$len = ( $len << 8 ) | ord( $der[ $pos + $i ] );
+			}
+			$pos += $n;
+		}
+		if ( $pos + $len > $total ) {
+			return null;
+		}
+		return array( $tag, $pos, $pos + $len );
+	}
+
+	/**
+	 * Splits a certificate into what its issuer signed, the signature algorithm OID and the signature.
+	 *
+	 * @param string $der Certificate, DER.
+	 * @return array|null array( tbs, algo, signature ), or null when it is not a plain certificate.
+	 */
+	protected static function split_certificate( $der ) {
+		$cert = self::der_element( $der, 0 );
+		if ( ! $cert || 0x30 !== $cert[0] || strlen( $der ) !== $cert[2] ) {
+			return null;
+		}
+		$tbs = self::der_element( $der, $cert[1] );
+		if ( ! $tbs || 0x30 !== $tbs[0] ) {
+			return null;
+		}
+		$alg = self::der_element( $der, $tbs[2] );
+		if ( ! $alg || 0x30 !== $alg[0] ) {
+			return null;
+		}
+		$oid = self::der_element( $der, $alg[1] );
+		$sig = self::der_element( $der, $alg[2] );
+		if ( ! $oid || 0x06 !== $oid[0] || ! $sig || 0x03 !== $sig[0] || $sig[2] !== $cert[2] || $sig[2] - $sig[1] < 2 || "\0" !== $der[ $sig[1] ] ) {
+			return null;
+		}
+		$b   = substr( $der, $oid[1], $oid[2] - $oid[1] );
+		$arc = array( (int) floor( ord( $b[0] ) / 40 ), ord( $b[0] ) % 40 );
+		$val = 0;
+		for ( $i = 1, $n = strlen( $b ); $i < $n; $i++ ) {
+			$val = ( $val << 7 ) | ( ord( $b[ $i ] ) & 0x7F );
+			if ( ! ( ord( $b[ $i ] ) & 0x80 ) ) {
+				$arc[] = $val;
+				$val   = 0;
+			}
+		}
+		return array(
+			'tbs'       => substr( $der, $cert[1], $tbs[2] - $cert[1] ),
+			'algo'      => implode( '.', $arc ),
+			'signature' => substr( $der, $sig[1] + 1, $sig[2] - $sig[1] - 1 ),
+		);
+	}
+
+	/**
+	 * Everything the key-identifier chain check needs to know about one certificate.
+	 *
+	 * @param string $der Certificate, DER.
+	 * @return array|null null when it cannot be used.
+	 */
+	protected static function chain_cert( $der ) {
+		if ( ! is_string( $der ) || '' === $der || strlen( $der ) > 8192 ) {
+			return null;
+		}
+		$parts = self::split_certificate( $der );
+		$pem   = "-----BEGIN CERTIFICATE-----\n" . chunk_split( base64_encode( $der ), 64, "\n" ) . "-----END CERTIFICATE-----\n"; // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode -- DER to PEM, not obfuscation.
+		$info  = $parts ? @openssl_x509_parse( $pem ) : false; // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- malformed input is handled below.
+		if ( ! $parts || ! $info || ! isset( self::CHAIN_SIG_ALGOS[ $parts['algo'] ] ) ) {
+			return null;
+		}
+		$ext = $info['extensions'] ?? array();
+		if ( isset( $ext['nameConstraints'] ) || isset( $ext['policyConstraints'] ) ) {
+			return null; // not evaluated here: refuse rather than ignore.
+		}
+		$norm = static function ( $v ) {
+			return preg_match( '/^(?:keyid:)?\s*([0-9A-Fa-f:]{40,})/', (string) $v, $m ) ? strtolower( str_replace( ':', '', $m[1] ) ) : '';
+		};
+		$bc = (string) ( $ext['basicConstraints'] ?? '' );
+		return array(
+			'der'     => $der,
+			'pem'     => $pem,
+			'parts'   => $parts,
+			'ski'     => $norm( $ext['subjectKeyIdentifier'] ?? '' ),
+			'aki'     => $norm( $ext['authorityKeyIdentifier'] ?? '' ),
+			'ca'      => false !== stripos( $bc, 'CA:TRUE' ),
+			'pathlen' => preg_match( '/pathlen:(\d+)/i', $bc, $m ) ? (int) $m[1] : null,
+			'from'    => (int) ( $info['validFrom_time_t'] ?? PHP_INT_MAX ),
+			'to'      => (int) ( $info['validTo_time_t'] ?? 0 ),
+		);
+	}
+
+	/**
+	 * Chain check for makers whose certificates name their issuer inconsistently (AMD): each certificate is
+	 * linked to its issuer by authority/subject key identifier, every signature is verified, every issuer
+	 * must be a CA within its validity and path length, and the top must be one of the trusted root files
+	 * (byte for byte). Anything it does not understand fails.
+	 *
+	 * @param string[]        $der_certs  Leaf first, then the other certificates the device sent, DER.
+	 * @param string[]|string $root_files PEM file(s) holding trusted roots.
+	 * @return bool
+	 */
+	protected static function verify_chain_by_key_id( array $der_certs, $root_files ) {
+		$roots = array();
+		foreach ( (array) $root_files as $file ) {
+			$text = is_file( $file ) ? file_get_contents( $file ) : ''; // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- local trusted-root file.
+			if ( preg_match_all( '/-----BEGIN CERTIFICATE-----([A-Za-z0-9+\/=\s]+)-----END CERTIFICATE-----/', (string) $text, $found ) ) {
+				foreach ( $found[1] as $b64 ) {
+					$root = self::chain_cert( base64_decode( preg_replace( '/\s+/', '', $b64 ), true ) ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_decode -- PEM body.
+					if ( $root && $root['ski'] ) {
+						$roots[ $root['der'] ] = $root;
+					}
+				}
+			}
+		}
+		$sent = array();
+		foreach ( array_slice( $der_certs, 1 ) as $der ) {
+			$c = self::chain_cert( $der );
+			if ( $c ) {
+				$sent[] = $c;
+			}
+		}
+		$cert = self::chain_cert( $der_certs[0] ?? '' );
+		$now  = time();
+		if ( ! $cert || ! $roots || $cert['from'] > $now || $cert['to'] < $now ) {
+			return false;
+		}
+		for ( $below = 0; $below < 8; $below++ ) {
+			if ( ! $cert['aki'] ) {
+				return false;
+			}
+			$issuer = null;
+			foreach ( array_merge( array_values( $roots ), $sent ) as $candidate ) {
+				if ( $candidate['ski'] !== $cert['aki'] || $candidate['der'] === $cert['der'] || ! $candidate['ca'] ) {
+					continue;
+				}
+				if ( $candidate['from'] > $now || $candidate['to'] < $now || ( null !== $candidate['pathlen'] && $below > $candidate['pathlen'] ) ) {
+					continue;
+				}
+				$key = @openssl_pkey_get_public( $candidate['pem'] ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- malformed input is a failed candidate.
+				if ( $key && 1 === openssl_verify( $cert['parts']['tbs'], $cert['parts']['signature'], $key, self::CHAIN_SIG_ALGOS[ $cert['parts']['algo'] ] ) ) {
+					$issuer = $candidate;
+					break;
+				}
+			}
+			if ( ! $issuer ) {
+				return false;
+			}
+			if ( isset( $roots[ $issuer['der'] ] ) ) {
+				return true; // signed by a root we ship, byte for byte.
+			}
+			$cert = $issuer;
+		}
+		return false;
 	}
 
 	// --- 2. credential activation -------------------------------------------------------------------
