@@ -328,7 +328,7 @@ class Thessley_Module_Passkey_Login {
 
 		if ( ! $request || $request->type !== $type || strtotime( $request->expires_at . ' UTC' ) < time() ) {
 			status_header( 410 );
-			echo '<!doctype html><meta charset="utf-8"><title>Expired</title><p>This login/enrollment request has expired. Go back and try again.</p>';
+			echo '<!doctype html><meta charset="utf-8"><title>Expired</title><p>This Thessley Passkey login/enrollment request has expired. Go back and try again.</p>';
 			exit;
 		}
 
@@ -890,7 +890,7 @@ class Thessley_Module_Passkey_Login {
 			sprintf(
 				"A new device (\"%s\") was just added to your account (%s) on %s, from IP %s.\n\n" .
 				"If this was you, no action is needed.\n\n" .
-				"If this wasn't you, log in and remove it immediately from your profile page's \"Passkey devices\" section, then change your password.",
+				"If this wasn't you, log in and remove it immediately from your profile page's \"Thessley Passkey devices\" section, then change your password.",
 				sanitize_text_field( $label ),
 				$user->user_login,
 				home_url(),
@@ -1326,7 +1326,7 @@ JS;
 			return;
 		}
 		?>
-		<h2>Passkey devices</h2>
+		<h2>Thessley Passkey devices</h2>
 		<div class="thessley" style="margin-bottom:20px">
 			<div id="thessley-pk-devices-wrap"><?php echo wp_kses( self::render_devices_list_html( $user ), self::devices_list_allowed_html() ); ?></div>
 
@@ -1334,8 +1334,8 @@ JS;
 				<div id="thessley-pk-enroll-box" style="margin-top:16px;max-width:300px;padding:20px;border:1px solid #dcdcde;border-radius:6px;background:#fff;text-align:center">
 					<?php
 				$enroll_hint_by_mode = array(
-					'optional' => "Add a new device to sign in without a password.",
-					'2fa'      => 'Add a new device to confirm logins with, after your password.',
+					'optional' => "Add a new device to sign in with the Thessley Passkey app, without a password.",
+					'2fa'      => 'Add a new device to confirm logins with the Thessley Passkey app, after your password.',
 					'required' => 'Add a new device — the Thessley Passkey app is the only way to sign in.',
 				);
 				?>
@@ -1407,7 +1407,7 @@ JS;
 									}
 
 									btn.style.display = 'none';
-									hint.textContent = "Scan this with the device you're enrolling, or tap the link below on that same device.";
+									hint.textContent = "Scan this with the Thessley Passkey app on the device you're enrolling, or tap the link below on that same device.";
 									qrBox.style.display = 'inline-block';
 									qrBox.innerHTML = '';
 									ThessleyQR.render(qrBox, data.app_link, 236);
