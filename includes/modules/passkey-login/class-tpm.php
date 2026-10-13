@@ -563,7 +563,8 @@ class Thessley_Passkey_Tpm {
 		if ( self::MAGIC !== $magic || self::ST_CERTIFY !== $type ) {
 			return 'not a TPM certification';
 		}
-		if ( ! hash_equals( $nonce, $extra ) ) {
+		// Some chips (AMD) take at most a SHA-256 digest of qualifying data, so a longer nonce comes back hashed.
+		if ( ! hash_equals( $nonce, $extra ) && ! ( strlen( $nonce ) > 32 && hash_equals( hash( 'sha256', $nonce, true ), $extra ) ) ) {
 			return 'certification is not bound to this enrolment';
 		}
 		if ( ! hash_equals( self::name( $key_public ), $certified ) ) {
