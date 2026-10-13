@@ -384,7 +384,7 @@ class Thessley_Module_Passkey_Login {
 		<title><?php echo esc_html( get_bloginfo( 'name' ) ); ?> — confirm login</title>
 		<div style="box-sizing:border-box;max-width:360px;margin:40px auto;padding:16px;font-family:sans-serif;text-align:center">
 			<h1 style="font-size:1.1em"><?php echo esc_html( get_bloginfo( 'name' ) ); ?></h1>
-			<p>Your password was correct. Confirm with the app to finish logging in.</p>
+			<p>Your password was correct. Confirm with the Thessley Passkey app to finish logging in.</p>
 			<div id="thessley-2fa-qr" style="display:inline-block;line-height:0;background:#fff;padding:12px;border-radius:4px"></div>
 			<p><a href="<?php echo esc_attr( $app_link ); ?>" style="display:block;box-sizing:border-box;width:100%;padding:12px 16px;border-radius:4px;background:#2271b1;color:#fff;font-weight:600;text-decoration:none">Open on this device</a></p>
 			<p id="thessley-2fa-status" style="color:#666"></p>
