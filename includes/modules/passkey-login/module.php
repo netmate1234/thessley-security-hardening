@@ -1531,6 +1531,9 @@ JS;
 							if ( ! btn ) {
 								return;
 							}
+							if ( ! window.confirm( 'Are you sure you want to revoke "' + ( btn.dataset.label || 'this device' ) + '"? It will no longer be able to approve logins.' ) ) {
+								return;
+							}
 							btn.disabled = true;
 							var body = new URLSearchParams({
 								action: 'thessley_pk_revoke',
@@ -1637,6 +1640,7 @@ JS;
 				'data-id'       => true,
 				'data-user-id'  => true,
 				'data-nonce'    => true,
+				'data-label'    => true,
 			),
 		);
 	}
@@ -1682,6 +1686,7 @@ JS;
 									<button type="button" class="button button-small thessley-pk-revoke-btn"
 										data-id="<?php echo esc_attr( $d->id ); ?>"
 										data-user-id="<?php echo esc_attr( $user->ID ); ?>"
+										data-label="<?php echo esc_attr( $d->label ); ?>"
 										data-nonce="<?php echo esc_attr( wp_create_nonce( 'thessley_pk_revoke_' . $d->id ) ); ?>">Revoke</button>
 								<?php endif; ?>
 							</td>
