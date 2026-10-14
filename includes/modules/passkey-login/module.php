@@ -1657,8 +1657,8 @@ JS;
 		else :
 			?>
 			<div class="thessley">
-			<table class="widefat striped thessley-pk-devices" style="max-width:680px">
-				<thead><tr><th>Label</th><th>Added</th><th>Last used</th><th>Status</th><th>Security</th><th></th></tr></thead>
+			<table class="widefat striped thessley-pk-devices" style="max-width:760px">
+				<thead><tr><th>Label</th><th>Added</th><th>Last used</th><th>Status</th><th>Security</th><th>Score</th><th></th></tr></thead>
 				<tbody>
 				<?php
 				// [tone, dashicon, label] — tone feeds Thessley_UI::badge()'s
@@ -1670,6 +1670,15 @@ JS;
 					'tee'       => array( 'good', 'lock', 'TEE hardware' ),
 					'software'  => array( 'warn', 'shield-alt', 'Software only' ),
 				);
+				// Security score (0-100) from where the key was verified to live at
+				// enrolment — the same values as the Drupal module. It does not know
+				// how the app protects the key (PIN, security key).
+				$attestation_score = array(
+					'strongbox' => 100,
+					'tpm'       => 95,
+					'tee'       => 85,
+					'software'  => 40,
+				);
 				?>
 				<?php foreach ( $devices as $d ) : ?>
 						<?php list( $att_tone, $att_icon, $att_label ) = $attestation_meta[ $d->attestation_level ?? '' ] ?? array( 'quiet', 'editor-help', 'Unverified' ); ?>
@@ -1680,6 +1689,7 @@ JS;
 							<td data-label="Last used"><?php echo $d->last_used_at ? esc_html( mysql2date( 'M j, Y H:i', $d->last_used_at ) ) : '—'; ?></td>
 							<td data-label="Status"><?php Thessley_UI::badge( $d->revoked_at ? 'Revoked' : 'Active', $d->revoked_at ? 'bad' : 'good', $d->revoked_at ? 'dismiss' : 'yes-alt' ); ?></td>
 							<td data-label="Security"><?php Thessley_UI::badge( $att_label, $att_tone, $att_icon ); ?></td>
+							<td data-label="Score"><?php echo $d->revoked_at ? '—' : esc_html( ( $attestation_score[ $d->attestation_level ?? '' ] ?? 20 ) . ' / 100' ); ?></td>
 							<td class="thessley-pk-actions">
 								<?php if ( ! $d->revoked_at && ( get_current_user_id() === (int) $user->ID || current_user_can( 'manage_options' ) ) ) : ?>
 									<?php // No <form> here — nested forms inside profile.php/user-edit.php break WordPress core's own nonce check; the click handler further up uses fetch() instead. ?>
