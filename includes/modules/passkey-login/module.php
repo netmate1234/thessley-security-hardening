@@ -1531,22 +1531,78 @@ JS;
 							if ( ! btn ) {
 								return;
 							}
+							// Step 1: "are you sure?". Step 2 (below): the person re-enters their password.
 							if ( ! window.confirm( 'Are you sure you want to revoke "' + ( btn.dataset.label || 'this device' ) + '"? It will no longer be able to approve logins.' ) ) {
 								return;
 							}
-							btn.disabled = true;
-							var body = new URLSearchParams({
-								action: 'thessley_pk_revoke',
-								id: btn.dataset.id,
-								user_id: btn.dataset.userId,
-								_wpnonce: btn.dataset.nonce,
+							askPassword( btn.dataset.label || 'this device', function ( password, fail, done ) {
+								var body = new URLSearchParams({
+									action: 'thessley_pk_revoke',
+									id: btn.dataset.id,
+									user_id: btn.dataset.userId,
+									_wpnonce: btn.dataset.nonce,
+									password: password,
+								});
+								fetch(<?php echo wp_json_encode( esc_url_raw( admin_url( 'admin-post.php' ) ) ); ?>, {
+									method: 'POST',
+									credentials: 'same-origin',
+									headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+									body: body,
+								}).then(function (r) {
+									return r.json().catch(function () { return {}; }).then(function (data) {
+										if ( r.ok && data.success ) {
+											done();
+											return refreshDevices();
+										}
+										fail( ( data && data.data && data.data.message ) || 'Could not revoke the device.' );
+									});
+								}).catch(function () { fail( 'Could not reach the site.' ); });
 							});
-							fetch(<?php echo wp_json_encode( esc_url_raw( admin_url( 'admin-post.php' ) ) ); ?>, {
-								method: 'POST',
-								headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-								body: body,
-							}).then(refreshDevices).catch(function () { btn.disabled = false; });
 						});
+
+						// The password prompt (step 2). Built with text nodes only, never innerHTML.
+						function askPassword(label, submit) {
+							function mk(tag, cls, text) {
+								var n = document.createElement(tag);
+								if ( cls ) { n.className = cls; }
+								if ( text ) { n.textContent = text; }
+								return n;
+							}
+							var dlg = mk('dialog', 'thessley-pk-dialog');
+							var form = mk('form');
+							form.setAttribute('method', 'dialog');
+							form.appendChild(mk('h3', null, 'Confirm it is you'));
+							form.appendChild(mk('p', null, 'Enter your password to revoke "' + label + '".'));
+							var input = mk('input');
+							input.type = 'password';
+							input.required = true;
+							input.autocomplete = 'current-password';
+							input.setAttribute('aria-label', 'Password');
+							form.appendChild(input);
+							var err = mk('p', 'thessley-pk-dialog-error');
+							err.setAttribute('role', 'alert');
+							form.appendChild(err);
+							var row = mk('div', 'thessley-pk-dialog-buttons');
+							var cancel = mk('button', 'button', 'Cancel');
+							cancel.type = 'button';
+							cancel.addEventListener('click', function () { dlg.close(); });
+							var ok = mk('button', 'button button-primary', 'Revoke device');
+							ok.type = 'submit';
+							row.appendChild(cancel);
+							row.appendChild(ok);
+							form.appendChild(row);
+							form.addEventListener('submit', function (ev) {
+								ev.preventDefault();
+								ok.disabled = true;
+								err.textContent = '';
+								submit( input.value, function (message) { err.textContent = message; ok.disabled = false; input.select(); }, function () { dlg.close(); } );
+							});
+							dlg.addEventListener('close', function () { dlg.remove(); });
+							dlg.appendChild(form);
+							document.body.appendChild(dlg);
+							if ( dlg.showModal ) { dlg.showModal(); } else { dlg.setAttribute('open', ''); }
+							input.focus();
+						}
 
 						<?php if ( get_current_user_id() === (int) $user->ID ) : ?>
 						(function () {
@@ -1711,6 +1767,16 @@ JS;
 	}
 
 
+	/** Wrong passwords allowed per window (seconds) before revoking is paused for that user. */
+	const REAUTH_MAX    = 5;
+	const REAUTH_WINDOW = 900;
+
+	/**
+	 * Revoke one device. Two steps: the page asks "are you sure?", and this handler then requires the acting
+	 * user's own password (an administrator revoking someone else's device uses their own). Revoking is what
+	 * you do when a phone is lost, so the app cannot be the proof, and an open session must not be enough to
+	 * wipe the devices. Answers JSON: {success:true} or {success:false, data:{message}}.
+	 */
 	public static function handle_revoke() {
 		$id = isset( $_POST['id'] ) ? absint( wp_unslash( $_POST['id'] ) ) : 0;
 		check_admin_referer( 'thessley_pk_revoke_' . $id );
@@ -1718,14 +1784,28 @@ JS;
 		$target_user_id = isset( $_POST['user_id'] ) ? absint( wp_unslash( $_POST['user_id'] ) ) : 0;
 
 		if ( get_current_user_id() !== $target_user_id && ! current_user_can( 'manage_options' ) ) {
-			wp_die( 'Forbidden', 403 );
+			wp_send_json_error( array( 'message' => 'Forbidden.' ), 403 );
 		}
+
+		$me       = wp_get_current_user();
+		$rl_key   = 'thessley_pk_reauth_' . $me->ID;
+		$failures = (int) get_transient( $rl_key );
+		if ( $failures >= self::REAUTH_MAX ) {
+			wp_send_json_error( array( 'message' => 'Too many wrong passwords. Try again in a few minutes.' ), 429 );
+		}
+
+		$password = isset( $_POST['password'] ) ? (string) wp_unslash( $_POST['password'] ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified by check_admin_referer() above; a password must not be sanitised.
+		if ( '' === $password || ! wp_check_password( $password, $me->user_pass, $me->ID ) ) {
+			set_transient( $rl_key, $failures + 1, self::REAUTH_WINDOW );
+			thessley_log_event( 'passkey-login', 'device_revoke_wrong_password', 'noted', 'user #' . $me->ID );
+			wp_send_json_error( array( 'message' => 'Wrong password.' ), 403 );
+		}
+		delete_transient( $rl_key );
 
 		Thessley_Passkey_Store::revoke( $id, $target_user_id );
 		thessley_log_event( 'passkey-login', 'device_revoked', 'noted', 'device #' . $id . ' for user #' . $target_user_id );
 
-		wp_safe_redirect( wp_get_referer() );
-		exit;
+		wp_send_json_success();
 	}
 
 	/**
