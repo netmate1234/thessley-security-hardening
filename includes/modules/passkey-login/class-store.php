@@ -261,12 +261,13 @@ class Thessley_Passkey_Store {
 	}
 
 	/** A user's devices, most recently used first; devices never used come last, newest first. */
+	/** Active (not revoked) devices only: a removed key must not linger as a card. */
 	public static function devices_for_user( $user_id ) {
 		global $wpdb;
 
 		return $wpdb->get_results(
 			$wpdb->prepare(
-				'SELECT id, credential_id, label, attestation_level, created_at, last_used_at, revoked_at FROM ' . self::passkeys_table() . ' WHERE user_id = %d ORDER BY (last_used_at IS NULL), last_used_at DESC, created_at DESC, id DESC',
+				'SELECT id, credential_id, label, attestation_level, created_at, last_used_at, revoked_at FROM ' . self::passkeys_table() . ' WHERE user_id = %d AND revoked_at IS NULL ORDER BY (last_used_at IS NULL), last_used_at DESC, created_at DESC, id DESC',
 				$user_id
 			)
 		);
