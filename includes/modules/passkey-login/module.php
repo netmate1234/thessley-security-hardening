@@ -986,20 +986,32 @@ class Thessley_Module_Passkey_Login {
 
 		thessley_log_event( 'passkey-login', 'enroll_approved', 'noted', 'user #' . (int) $request->requester_user_id . ' added device "' . sanitize_text_field( $label ) . '"' );
 		self::notify_device_enrolled( (int) $request->requester_user_id, $label );
-		$level = '';
-		$tpm   = $req->get_param( 'tpm' );
+		// `attestation` is the old field the desktop agents read (where the key
+		// is kept, as a storage name). `attestation_status` is the verdict the
+		// phone shows, in the same words the Linux PAM and Windows AD services
+		// use — without it the app could only say "not verified" for a site.
+		$level      = '';
+		$att_status = 'unverified';
+		$att_reason = '';
+		$tpm        = $req->get_param( 'tpm' );
 		if ( is_array( $tpm ) ) {
 			$result = self::verify_tpm( $id, $request->nonce, $public_key, $tpm );
 			if ( $result['ok'] ) {
 				Thessley_Passkey_Store::set_attestation_level( $row_id, 'tpm' );
 				thessley_log_event( 'passkey-login', 'attestation_verified', 'noted', 'device #' . $row_id . ': tpm (' . trim( $result['maker'] . ' ' . $result['model'] ) . ')' );
-				$level = 'tpm';
+				$level      = 'tpm';
+				$att_status = 'verified_tpm';
+				$att_reason = 'hardware_attestation_valid';
 			} else {
 				Thessley_Passkey_Store::set_attestation_level( $row_id, null );
 				thessley_log_event( 'passkey-login', 'attestation_unverified', 'noted', 'device #' . $row_id . ': tpm: ' . $result['reason'] );
+				$att_reason = (string) $result['reason'];
 			}
 		} else {
-			self::record_attestation( $row_id, $attestation_chain, $request->nonce, $public_key );
+			$recorded   = self::record_attestation( $row_id, $attestation_chain, $request->nonce, $public_key );
+			$level      = $recorded['level'];
+			$att_status = $recorded['status'];
+			$att_reason = $recorded['reason'];
 		}
 
 		// The app needs this for every future login/respond call — it has
@@ -1019,10 +1031,12 @@ class Thessley_Module_Passkey_Login {
 
 		return rest_ensure_response(
 			array(
-				'result'        => 'ok',
-				'credential_id' => $credential_id,
-				'username'      => $enrolled_user ? $enrolled_user->user_login : '',
-				'attestation'   => $level,
+				'result'             => 'ok',
+				'credential_id'      => $credential_id,
+				'username'           => $enrolled_user ? $enrolled_user->user_login : '',
+				'attestation'        => $level,
+				'attestation_status' => $att_status,
+				'attestation_reason' => $att_reason,
 			)
 		);
 	}
@@ -1067,6 +1081,9 @@ class Thessley_Module_Passkey_Login {
 	 * profile page shows whatever level comes back, and a confirmed
 	 * software-only (non-hardware-backed) result is worth knowing about
 	 * even before this becomes a hard gate.
+	 *
+	 * @return array{level:string,status:string,reason:string} what the phone
+	 *   should be told: the storage name, the shared verdict word, and why.
 	 */
 	private static function record_attestation( $row_id, $attestation_chain, $nonce, $public_key ) {
 		$result = Thessley_Passkey_Attestation::verify( $attestation_chain, $nonce, $public_key );
@@ -1074,11 +1091,32 @@ class Thessley_Module_Passkey_Login {
 		if ( ! $result['ok'] ) {
 			Thessley_Passkey_Store::set_attestation_level( $row_id, null );
 			thessley_log_event( 'passkey-login', 'attestation_unverified', 'noted', 'device #' . $row_id . ': ' . $result['reason'] );
-			return;
+			return array( 'level' => '', 'status' => 'unverified', 'reason' => (string) $result['reason'] );
 		}
 
-		Thessley_Passkey_Store::set_attestation_level( $row_id, $result['security_level_name'] );
-		thessley_log_event( 'passkey-login', 'attestation_verified', 'noted', 'device #' . $row_id . ': ' . $result['security_level_name'] );
+		$level = (string) $result['security_level_name'];
+		Thessley_Passkey_Store::set_attestation_level( $row_id, $level );
+		thessley_log_event( 'passkey-login', 'attestation_verified', 'noted', 'device #' . $row_id . ': ' . $level );
+		return array( 'level' => $level, 'status' => self::attestation_status( $level ), 'reason' => 'hardware_attestation_valid' );
+	}
+
+	/**
+	 * The verdict words shared with the Linux PAM and Windows AD services, so
+	 * the phone can show the same sentence for a website, a computer and a VPN.
+	 */
+	private static function attestation_status( $level ) {
+		switch ( $level ) {
+			case 'tee':
+				return 'verified_tee';
+			case 'strongbox':
+				return 'verified_strongbox';
+			case 'software':
+				return 'verified_software';
+			case 'tpm':
+				return 'verified_tpm';
+			default:
+				return 'unverified';
+		}
 	}
 
 	// --- wp-login.php integration ----------------------------------------
