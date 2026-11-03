@@ -39,7 +39,7 @@ Requires WordPress 6.0+ and PHP 8.3+. No external service is called unless you c
 ## Related
 
 - [Thessley](https://github.com/netmate1234/Thessley) — the project family and overview deck
-- [Thessley Passkey](https://github.com/netmate1234/thessley-passkey) — the passwordless login plugin (split out of this one in 1.0.24)
+- [Thessley Passkey](https://github.com/netmate1234/thessley-passkey-wordpress) — the passwordless login plugin (split out of this one in 1.0.24)
 
 ## License
 
