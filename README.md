@@ -1,18 +1,33 @@
 # Thessley Security Hardening
 
+![License](https://img.shields.io/badge/license-GPL--2.0--or--later-7c6cf0?style=flat-square) ![WordPress](https://img.shields.io/badge/WordPress-6.0%2B-21759b?style=flat-square) ![PHP](https://img.shields.io/badge/PHP-8.3%2B-777bb4?style=flat-square) ![Plugin Check](https://img.shields.io/badge/Plugin%20Check-0%20errors%20%C2%B7%200%20warnings-35d0c0?style=flat-square)
+
+[![Thessley Security Hardening](docs/preview/hero.png)](https://netmate1234.github.io/Thessley/)
+
 Modular WordPress security hardening — perimeter blocking, request inspection, integrity and malware detection, hardening and alerts — with one Event Log across every module.
 
-- **Modules** can run in log-only or enforcing mode, independently.
-- **Event Log** records everything with a 1–20 severity; alerts go to Telegram and/or email.
-- **No external calls** when you do not configure a service; the plugin works on its own.
+## What it does
+
+- **Perimeter:** IP blocklist from public feeds, geo blocking, geo-login for `wp-login.php`, per-IP rate limiting.
+- **Request inspection:** SQL injection, XSS, traversal and command-injection signatures; failed-login lockout.
+- **Detection:** file integrity against WordPress.org checksums, malware signatures, vulnerability scan, user watchdog.
+- **Hardening:** removes the tools an attacker reaches for after getting in; security headers; user enumeration.
+- **Operations:** one Event Log with severity 1–20, Telegram/email alerts, activity and bot logs, config import/export.
+
+Every module can run in **log-only** or **enforcing** mode, independently — nothing is all-or-nothing.
 
 ## Install
 
-Upload the `thessley-security-hardening` folder to `wp-content/plugins/`, activate it, then use the plugin's own admin pages. Builds are attached to the releases.
+1. Upload the `thessley-security-hardening` folder to `wp-content/plugins/`, or install the zip from [Releases](https://github.com/netmate1234/thessley-security-hardening/releases).
+2. Activate it, then open **Thessley Security Hardening** and enable the modules you want.
+3. The Event Log records everything regardless of which alerts you configure.
 
-Requires WordPress 6.0+ and PHP 8.3+.
+Requires WordPress 6.0+ and PHP 8.3+. No external service is called unless you configure one.
 
-**Deck:** [Thessley overview](https://netmate1234.github.io/thessley-presentations/thessley/) · **Project family:** [Thessley](https://github.com/netmate1234/Thessley)
+## Related
+
+- [Thessley](https://github.com/netmate1234/Thessley) — the project family and overview deck
+- [Thessley Passkey](https://github.com/netmate1234/thessley-passkey) — the passwordless login plugin (split out of this one in 1.0.24)
 
 ## License
 
