@@ -208,7 +208,7 @@ Opt-in. Uses this site's own mail system, not a third-party service, so nothing 
 * Fixed a data-loss bug in the legacy-identifier migration: the old-checks-directory cleanup was deleting compiled runtime data (Geo Blocker's country index, IP Blocklist's compiled ranges) along with the stale files it was meant to remove, with no automatic way to regenerate it. Compiled data now survives the migration.
 
 = 1.0.12 =
-* Renamed from ShieldCore Security to Thessley Security Hardening at WordPress.org's request — "ShieldCore" conflicts with existing security-industry products and is too close to the established "Shield Security" plugin. No functional changes. Internal identifiers renamed from `shieldcore` to `thessley` with an automatic one-time migration on upgrade, chained after the existing wpopsec->shieldcore migration so a site on either historical prefix ends up fully migrated in one pass; Config Import/Export's file-format identifier changed again as well.
+* Renamed from ShieldCore Security to Thessley Security Hardening at WordPress.org's request — "ShieldCore" conflicts with existing security-industry products and is too close to the established "Shield Security" plugin. No functional changes. Internal identifiers renamed from `shieldcore` to `thessley` with an automatic one-time migration on upgrade, chained after the older legacy-prefix migration so a site on either historical prefix ends up fully migrated in one pass; Config Import/Export's file-format identifier changed again as well.
 
 = 1.0.11 =
 * Purged remaining "Opsec" strings from plugin/infra code (test messages, alert text, uploads-guard marker, outbound email From header) and fixed a bug where Config Import/Export's own file-format check rejected every file it had just exported. Renamed the plugin's directory and main file (opsec/opsec.php -> shieldcore-security/shieldcore-security.php) to match.
@@ -225,7 +225,7 @@ Opt-in. Uses this site's own mail system, not a third-party service, so nothing 
 * Two leftover "Opsec" references in this readme (description opener, install path) updated to ShieldCore Security.
 
 = 1.0.7 =
-* Internal identifiers (PHP classes, functions, hooks, options, the three custom database tables, mu-plugin file/folder names, admin-page slugs, CSS classes) renamed from the old `wpopsec`/`WPOpsec` prefix to `shieldcore`, matching the public rename to ShieldCore Security. An automatic one-time migration on upgrade renames the existing tables and options in place so no data is lost; sites are not required to deactivate/reactivate first. Config Import/Export's file-format identifier also changed, so a config file exported before this version can no longer be re-imported.
+* Internal identifiers (PHP classes, functions, hooks, options, the three custom database tables, mu-plugin file/folder names, admin-page slugs, CSS classes) renamed from the original internal prefix to `shieldcore`, matching the public rename to ShieldCore Security. An automatic one-time migration on upgrade renames the existing tables and options in place so no data is lost; sites are not required to deactivate/reactivate first. Config Import/Export's file-format identifier also changed, so a config file exported before this version can no longer be re-imported.
 
 = 1.0.6 =
 * Renamed from EagleEye Opsec to ShieldCore Security at WordPress.org's request — "EagleEye" and "Opsec" both conflict with existing registered/in-use security-industry marks. No functional changes.

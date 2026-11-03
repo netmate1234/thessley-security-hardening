@@ -132,14 +132,14 @@ class Thessley_Module_Loader {
 
 	/**
 	 * Two independently-gated one-time upgrades chained together, one per
-	 * historical rename this plugin has gone through: `wpopsec_` (original)
-	 * -> `shieldcore_` -> `thessley_` (current). Each stage only touches
+	 * historical rename this plugin has gone through: the original
+	 * prefix -> `shieldcore_` -> `thessley_` (current). Each stage only touches
 	 * identifiers still under its own specific old prefix and is gated on
 	 * its own "done" flag, so a site is migrated exactly as many stages as
 	 * it actually needs regardless of which historical name it started
 	 * from — one already on `shieldcore_` skips stage 1 entirely (its old
 	 * table/option names don't exist to find) and only runs stage 2; a
-	 * still-unmigrated `wpopsec_` site runs both, back to back, in the same
+	 * still-unmigrated legacy site runs both, back to back, in the same
 	 * request. Table names are renamed in place (RENAME TABLE) rather than
 	 * copied, so existing rows survive without a copy/drop step; options are
 	 * renamed the same way via a single UPDATE rather than read/write per
@@ -149,11 +149,11 @@ class Thessley_Module_Loader {
 	private static function migrate_legacy_identifiers() {
 		// 'shieldcore_legacy_migrated' is not a typo of the current prefix:
 		// it's the literal flag name this stage has used since the original
-		// wpopsec_ -> shieldcore_ rename, and every already-migrated site
+		// legacy-prefix rename, and every already-migrated site
 		// already has it set to 1 — reusing it (rather than a fresh flag
 		// name) is what lets this stage correctly no-op on those sites
 		// instead of re-running against tables/options that no longer
-		// exist under their wpopsec_ names.
+		// exist under their old names.
 		self::migrate_identifier_prefix( 'shieldcore_legacy_migrated', 'wpopsec_', 'shieldcore_', 'wp-opsec-early.php', 'wp-opsec-checks' );
 		self::migrate_identifier_prefix( 'thessley_legacy_migrated', 'shieldcore_', 'thessley_', 'wp-shieldcore-early.php', 'wp-shieldcore-checks' );
 	}
