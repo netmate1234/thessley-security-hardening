@@ -4,7 +4,7 @@ Tags: security, firewall, malware, geo-blocking, brute-force
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 8.3
-Stable tag: 1.0.23
+Stable tag: 1.0.24
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -156,6 +156,9 @@ Opt-in. Sends a message to a Telegram chat you control when a security event exc
 Opt-in. Uses this site's own mail system, not a third-party service, so nothing is sent to any server listed here.
 
 == Changelog ==
+
+= 1.0.24 =
+* Passkey Login moved to its own plugin, **Thessley Passkey**. Same tables, options and protocol: install the new plugin before this update and every enrolled device keeps working. This plugin no longer bundles the passkey code, its QR assets or its TPM roots.
 
 = 1.0.23 =
 * IP Blocklist: added three reputation feeds — IPsum (aggregates 30+ public blocklists, kept at count >= 3 for precision), FireHOL's webserver-attacker list, and ReportedIP's CMS-login list (WordPress/Drupal/CMS backend-login attackers). All opt-in, off by default, same as every other source.
