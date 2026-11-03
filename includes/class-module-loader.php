@@ -48,7 +48,6 @@ class Thessley_Module_Loader {
 		// compiled country dataset and class, so must load after it.
 		'geo-login'       => 'Thessley_Module_Geo_Login',
 		'rate-limiter'    => 'Thessley_Module_Rate_Limiter',
-		'passkey-login'   => 'Thessley_Module_Passkey_Login',
 
 		// Request inspection — looks at what a request is doing, not just who it's from.
 		'query-guard'     => 'Thessley_Module_Query_Guard',
