@@ -6,6 +6,18 @@
 
 Modular WordPress security hardening — perimeter blocking, request inspection, integrity and malware detection, hardening and alerts — with one Event Log across every module.
 
+## Quick install
+
+```sh
+wp plugin install https://github.com/netmate1234/thessley-security-hardening/releases/latest/download/thessley-security-hardening-1.0.24.zip --activate
+```
+
+Or upload the release zip under **Plugins → Add New → Upload Plugin**.
+
+**Verify:** the **Thessley Security Hardening** menu appears and **Event Log** lists the site's events.
+
+Requirements: WordPress 6.0+, PHP 8.3+.
+
 ## What it does
 
 - **Perimeter:** IP blocklist from public feeds, geo blocking, geo-login for `wp-login.php`, per-IP rate limiting.
