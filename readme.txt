@@ -62,6 +62,8 @@ Thessley Security Hardening is a modular security plugin. Each feature is a self
 2. Activate the plugin.
 3. Each module starts in log-only mode where applicable — review the Event Log for a few days before switching any module to Block.
 
+Before enabling enforcement, test on staging, verify the site's trusted-network and login behavior, and keep hosting/WP-CLI recovery access. Enable one module at a time. If access breaks, deactivate `thessley-security-hardening` with WP-CLI (`wp plugin deactivate thessley-security-hardening`) or the hosting file manager; prefer deactivation over deletion so data is retained while diagnosing.
+
 == Frequently Asked Questions ==
 
 = Will this lock me out of my own site? =

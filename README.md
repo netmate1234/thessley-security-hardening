@@ -16,6 +16,8 @@ Or upload the release zip under **Plugins → Add New → Upload Plugin**.
 
 **Verify:** the **Thessley Security Hardening** menu appears and **Event Log** lists the site's events.
 
+**Lockout prevention:** leave modules in log-only mode while reviewing the Event Log; enable enforcement one module at a time after staging tests. Verify the site's trusted-network and login behavior first, and retain hosting/WP-CLI recovery access. If needed, deactivate `thessley-security-hardening` through WP-CLI or the hosting file manager; do not delete the plugin or its data as the first recovery step. See the [safe install and recovery guide](https://github.com/netmate1234/Thessley/blob/main/docs/wordpress-safe-install.md).
+
 Requirements: WordPress 6.0+, PHP 8.3+.
 
 ## What it does
